@@ -243,13 +243,15 @@ Klang uses YouTube Music's unofficial interface, like other community players. T
 <details>
 <summary><b>Are there ads?</b></summary>
 <br>
-Klang plays music through YouTube's official embedded player, so YouTube decides about ads, just like on youtube.com. If you signed in through the Klang window with a Premium account, the player knows you too.
+Klang plays music through YouTube Music itself, so YouTube decides about ads, just like on music.youtube.com. Sign in with a Premium account and there are none.
 </details>
 
 <details>
-<summary><b>Why does Klang sometimes skip a song?</b></summary>
+<summary><b>How does Klang play music?</b></summary>
 <br>
-Some labels don't allow their uploads to play outside of YouTube. When that happens, Klang quietly looks for another official upload of the same song with the same length and plays that instead. If there isn't one, it moves on to the next song and tells you.
+Through YouTube Music itself. Many labels block their songs in embedded players, so Klang loads the real YouTube Music page in a hidden window and steers its player. Whatever plays on music.youtube.com plays in Klang, and media keys and the Windows media overlay control Klang's queue.
+<br><br>
+If YouTube ever asks you to sign in or to confirm you're not a robot, Klang stops and shows you, instead of skipping songs. Once that's done, press play again.
 </details>
 
 <details>
@@ -287,7 +289,8 @@ Klang only listens on your own computer (`127.0.0.1`), never on your network, an
 - [ ] Import playlists from Spotify
 - [x] Sign in to see your YouTube Music library and playlists
 - [ ] Mini player that stays on top
-- [ ] Tray icon and media keys when the window is in the background
+- [x] Media keys and the Windows media overlay, even when Klang is in the background
+- [ ] Tray icon
 - [x] One .exe, no Python needed
 - [ ] Code-signed builds, so Windows stops warning on first start
 
@@ -303,7 +306,7 @@ Ideas and bug reports are welcome in the issues.
                   │  stores likes and playlists in %APPDATA%\Klang
                   ▼
               app window (WebView2) ──▶ ui/  (plain HTML, CSS, JavaScript)
-                                   └─ plays through the official YouTube embed
+                                   └─ steers YouTube Music, loaded in a hidden window
 ```
 
 No frameworks. The interface is three files in `ui/`, the helper is a single Python file, and `klang.spec` packs both into `Klang.exe`. Every push is built and smoke-tested on Windows by GitHub Actions; publishing a release attaches the exe automatically. Run `python server.py --no-window` to start just the helper and open `http://127.0.0.1:8777` in any browser.

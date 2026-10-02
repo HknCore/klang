@@ -889,6 +889,8 @@ function renderSidebar() {
      normal browser. Some songs are blocked there by their labels.
    - DemoEngine: a silent stand-in for demo mode (no internet needed). */
 
+const sentence = (t) => (t || "").trim().replace(/([^.!?])$/, "$1.");
+
 function showCoverInPanel(track) {
   const box = $(".video-wrap .video");
   $(".fake-video", box)?.remove();
@@ -1016,6 +1018,7 @@ class HostEngine {
   }
   play() {
     if (this.cued) { const c = this.cued; this.cued = null; this.load(c.id, true, c.start); return; }
+    if (this.blocked) { this.blocked = false; this.load(this.want, true, this.st.t || 0); return; }
     this.restart();
     this.cmd("play");
   }
@@ -1036,6 +1039,28 @@ class HostEngine {
   }
   duration() { return this.st.d || current()?.seconds || 0; }
   buffered() { return this.st.buf || 0; }
+  askForHelp(ps) {
+    // YouTube wants a signed-in or confirmed listener. Don't skip through the
+    // whole queue: stop and let the person fix it, then play resumes this song.
+    this.blocked = true;
+    this.h.onState("paused");
+    $("#btnPlay").classList.remove("busy");
+    if (!signedIn()) {
+      const body = acctDialog(`
+        <h3>YouTube wants you to sign in</h3>
+        <p>${esc(sentence(ps.reason) || "YouTube asks for a signed-in account to play this.")} Sign in once and Klang can play everything YouTube Music plays for you.</p>
+        <div class="dlg-actions"><button class="btn ghost" data-act="cancel">Not now</button><button class="btn primary" data-act="go">Sign in with YouTube</button></div>`);
+      $("[data-act=cancel]", body).onclick = closeAcctDialog;
+      $("[data-act=go]", body).onclick = () => { closeAcctDialog(); startSignIn(); };
+      return;
+    }
+    const body = acctDialog(`
+      <h3>YouTube wants to check something</h3>
+      <p>${esc(sentence(ps.reason) || "YouTube asks for a confirmation before playing.")} Klang can show you YouTube's player so you can answer it. Then press play again.</p>
+      <div class="dlg-actions"><button class="btn ghost" data-act="cancel">Not now</button><button class="btn primary" data-act="go">Show YouTube's player</button></div>`);
+    $("[data-act=cancel]", body).onclick = closeAcctDialog;
+    $("[data-act=go]", body).onclick = () => { closeAcctDialog(); this.cmd("show"); };
+  }
   setVolume(v) {                           // the slider sends many values while dragging
     this.nextVolume = v;
     if (this.volumeTimer) return;
@@ -1076,6 +1101,12 @@ class HostEngine {
         this.h.onError("timeout");
       }
       return;
+    }
+    if (s.ps && this.errFor !== this.want) {
+      this.errFor = this.want;
+      const needsAccount = s.ps.status === "LOGIN_REQUIRED" || s.ps.status === "AGE_CHECK_REQUIRED";
+      if (needsAccount) return this.askForHelp(s.ps);
+      return this.h.onError(150);
     }
     if (s.err != null && this.errFor !== this.want) {
       this.errFor = this.want;

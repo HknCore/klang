@@ -1136,6 +1136,30 @@ GOOGLE_SIGN_IN = (
 )
 
 
+def take_over_session(win, attempts=1):
+    """If the window holds a signed-in YouTube session, use it for Klang. Returns True on success."""
+    tried = None
+    for _ in range(attempts):
+        try:
+            jar = {}
+            for c in win.get_cookies() or []:
+                for name, morsel in c.items():
+                    domain = (morsel["domain"] or "").lower()
+                    if not domain or domain.endswith("youtube.com"):
+                        jar[name] = morsel.value
+            if "__Secure-3PAPISID" in jar:
+                cookie = "; ".join(f"{k}={v}" for k, v in jar.items())
+                if cookie != tried:
+                    tried = cookie
+                    sign_in_with(auth_headers_from_cookie(cookie))
+                    return True
+        except Exception as e:
+            print(f"[sign-in] {e!r}")
+            _login.update(error=str(e))
+        time.sleep(1.5)
+    return False
+
+
 def open_login_window():
     """Show Google's own sign-in page in a Klang window, then take over the YouTube session."""
     import webview
@@ -1148,33 +1172,18 @@ def open_login_window():
     win.events.shown += lambda: style_title_bar(win)
 
     def watch():
-        tried = None
         while not closed.is_set():
             time.sleep(1.2)
             try:
-                current = win.get_current_url() or ""
-                if ".youtube.com" not in current:
+                if ".youtube.com" not in (win.get_current_url() or ""):
                     continue
-                jar = {}
-                for c in win.get_cookies() or []:
-                    for name, morsel in c.items():
-                        domain = (morsel["domain"] or "").lower()
-                        if not domain or domain.endswith("youtube.com"):
-                            jar[name] = morsel.value
-                if "__Secure-3PAPISID" not in jar:
-                    continue
-                cookie = "; ".join(f"{k}={v}" for k, v in jar.items())
-                if cookie == tried:
-                    continue
-                tried = cookie
-                sign_in_with(auth_headers_from_cookie(cookie))
+            except Exception:
+                continue
+            if take_over_session(win):
                 _login.update(state="done")
                 win.destroy()
                 engine_reload()  # the player picks up your account (Premium: no ads)
                 return
-            except Exception as e:
-                print(f"[sign-in] {e!r}")
-                _login.update(error=str(e))
         if _login["state"] == "open":
             _login.update(state="closed")
 
@@ -1188,7 +1197,8 @@ def open_login_window():
 # music.youtube.com plays in Klang, with your account (Premium: no ads).
 
 ENGINE_HOME = "https://music.youtube.com/"
-_engine = {"win": None, "loaded": False, "state": {}, "pending": None, "needs_you": "", "lock": threading.Lock()}
+_engine = {"win": None, "loaded": False, "state": {}, "pending": None, "needs_you": "", "quitting": False,
+           "lock": threading.Lock()}
 
 ENGINE_JS = r"""
 (() => {
@@ -1310,6 +1320,10 @@ def engine_command(cmd, args):
         "volume": f"window.__klang && window.__klang.volume({max(0, min(100, int(args.get('v') or 0)))})",
         "mute": f"window.__klang && window.__klang.mute({'true' if args.get('m') else 'false'})",
     }
+    if cmd == "show":  # let you answer something YouTube asks (robot check, sign-in)
+        _engine["needs_you"] = _engine["needs_you"] or "check"
+        _engine["win"].show()
+        return
     if cmd not in simple:
         raise ValueError("Unknown command")
     engine_js(simple[cmd])
@@ -1404,12 +1418,22 @@ def create_engine_window(webview):
                 win.hide()
             except Exception:
                 pass
+            if not _auth["headers"]:  # you signed in there: use it for your library too
+                threading.Thread(target=take_over_session, args=(win, 3), daemon=True).start()
         _engine["state"] = {}
         _engine["loaded"] = True
         engine_inject()
         engine_run_pending()
 
+    def on_closing():
+        if _engine["quitting"]:
+            return True
+        win.hide()  # closing only hides the player; Klang keeps playing
+        _engine["needs_you"] = ""
+        return False
+
     win.events.loaded += on_loaded
+    win.events.closing += on_closing
     win.events.shown += lambda: style_title_bar(win)
     threading.Thread(target=engine_poll, daemon=True).start()
     return win
@@ -1439,6 +1463,7 @@ def run_native_window(url, with_engine=True):
 
             def on_main_closed():
                 # Closing Klang's window quits Klang, including the hidden player
+                _engine["quitting"] = True
                 for w in list(webview.windows):
                     if w is not window:
                         try:
