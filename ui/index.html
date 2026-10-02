@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Klang</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/bricolage-grotesque-latin-standard-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- Icons -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16 16 4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z" fill="currentColor"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+  <symbol id="i-heart-f" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z" fill="currentColor"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8v4.5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.9l10.4-6.5a1 1 0 0 0 0-1.8L9.5 4.6A1 1 0 0 0 8 5.5z" fill="currentColor"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 6.3v11.4a.8.8 0 0 0 1.2.7l8.6-5.7a.8.8 0 0 0 0-1.4L7.2 5.6A.8.8 0 0 0 6 6.3z" fill="currentColor"/><rect x="16.5" y="5.5" width="2.2" height="13" rx="1" fill="currentColor"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M18 6.3v11.4a.8.8 0 0 1-1.2.7l-8.6-5.7a.8.8 0 0 1 0-1.4l8.6-5.7A.8.8 0 0 1 18 6.3z" fill="currentColor"/><rect x="5.3" y="5.5" width="2.2" height="13" rx="1" fill="currentColor"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M4 7h3.5c2 0 3 1 4 2.5L14 14c1 1.5 2 2.5 4 2.5h2M4 17h3.5c1.2 0 2-.4 2.7-1M14 8.5c.7-1 1.6-1.5 3-1.5H20m-2.5-2.5L20 7l-2.5 2.5m0 5L20 17l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M5 11V9.5A2.5 2.5 0 0 1 7.5 7H18m-2.5-2.5L18 7l-2.5 2.5M19 13v1.5a2.5 2.5 0 0 1-2.5 2.5H6m2.5 2.5L6 17l2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 6.5h12M4 11.5h12M4 16.5h7" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M15 14.5v5.2a.5.5 0 0 0 .8.4l3.9-2.6a.5.5 0 0 0 0-.8l-3.9-2.6a.5.5 0 0 0-.8.4z" fill="currentColor"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M14.5 5v14" stroke="currentColor" stroke-width="1.8"/></symbol>
+  <symbol id="i-vol" viewBox="0 0 24 24"><path d="M4.5 9.5h3l4.3-3.6a.6.6 0 0 1 1 .5v11.2a.6.6 0 0 1-1 .5L7.5 14.5h-3a.5.5 0 0 1-.5-.5v-4a.5.5 0 0 1 .5-.5z" fill="currentColor"/><path d="M16 9a4 4 0 0 1 0 6m2.5-8.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4.5 9.5h3l4.3-3.6a.6.6 0 0 1 1 .5v11.2a.6.6 0 0 1-1 .5L7.5 14.5h-3a.5.5 0 0 1-.5-.5v-4a.5.5 0 0 1 .5-.5z" fill="currentColor"/><path d="m16.5 9.5 5 5m0-5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="18" cy="12" r="1.7" fill="currentColor"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m14.5 6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-fwd" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2m-7 0 .8 11.2a1 1 0 0 0 1 .8h4.4a1 1 0 0 0 1-.8L17 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M5 19h3.5L18.3 9.2a1.6 1.6 0 0 0 0-2.3l-1.2-1.2a1.6 1.6 0 0 0-2.3 0L5 15.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M8.2 15.8a5.4 5.4 0 0 1 0-7.6m7.6 0a5.4 5.4 0 0 1 0 7.6M5.4 18.6a9.3 9.3 0 0 1 0-13.2m13.2 0a9.3 9.3 0 0 1 0 13.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M13 5h6v6m0-6-8 8M17 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-disc" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2" fill="currentColor"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 19.5a7 7 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+</svg>
+
+<!-- Splash -->
+<div id="splash" aria-hidden="true">
+  <div class="splash-stage">
+    <svg class="ring splash-ring" viewBox="-100 -100 200 200" data-bars="72" data-r="58" data-len="26"></svg>
+    <div class="wordmark" aria-label="Klang"><span>k</span><span>l</span><span>a</span><span>n</span><span>g</span></div>
+  </div>
+  <p class="splash-status">Connecting to YouTube Music</p>
+</div>
+
+<div id="app" inert>
+  <!-- Sidebar -->
+  <nav class="side">
+    <div class="brand"><svg class="ring brand-ring" viewBox="-100 -100 200 200" data-bars="28" data-r="52" data-len="34"></svg><span>klang</span></div>
+    <div class="nav-group">
+      <button class="nav-item" data-nav="home"><svg><use href="#i-home"/></svg>Home</button>
+      <button class="nav-item" data-nav="search"><svg><use href="#i-search"/></svg>Search</button>
+      <button class="nav-item" data-nav="liked"><svg><use href="#i-heart"/></svg>Liked songs<span class="count" id="likedCount"></span></button>
+      <button class="nav-item" data-nav="recent"><svg><use href="#i-clock"/></svg>Recently played</button>
+    </div>
+    <div class="nav-head">
+      <span>Playlists</span>
+      <button class="icon-btn sm" id="newPlaylist" title="New playlist"><svg><use href="#i-plus"/></svg></button>
+    </div>
+    <div class="nav-playlists" id="navPlaylists"></div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main">
+    <header class="topbar">
+      <div class="hist">
+        <button class="icon-btn" id="histBack" title="Back (Alt+←)"><svg><use href="#i-back"/></svg></button>
+        <button class="icon-btn" id="histFwd" title="Forward (Alt+→)"><svg><use href="#i-fwd"/></svg></button>
+      </div>
+      <div class="searchbox" id="searchbox">
+        <svg class="sb-icon"><use href="#i-search"/></svg>
+        <input id="q" type="text" placeholder="Search songs, albums or artists" autocomplete="off" spellcheck="false">
+        <kbd>Ctrl K</kbd>
+        <button class="icon-btn sm sb-clear" id="qClear" title="Clear search"><svg><use href="#i-close"/></svg></button>
+        <div class="suggest" id="suggest" role="listbox"></div>
+      </div>
+      <div class="topbar-end"></div>
+    </header>
+    <div class="scroller" id="scroller">
+      <div class="view" id="view"></div>
+    </div>
+  </main>
+
+  <!-- Now playing / queue -->
+  <aside class="panel" id="panel">
+    <div class="panel-inner">
+      <div class="video-wrap">
+        <div class="video-glow" id="videoGlow"></div>
+        <div class="video"><div id="yt"></div><div class="video-empty" id="videoEmpty">Pick a song to get started.</div></div>
+      </div>
+      <div class="np">
+        <div class="np-title" id="npTitle">Nothing playing</div>
+        <div class="np-artist" id="npArtist"></div>
+      </div>
+      <div class="panel-head">
+        <span>Up next</span>
+        <label class="switch" title="When the queue runs out, keep playing similar songs"><input type="checkbox" id="autoRadio" checked><i></i>Autoplay</label>
+      </div>
+      <ol class="queue" id="queue"></ol>
+    </div>
+  </aside>
+
+  <!-- Player bar -->
+  <footer class="bar">
+    <div class="bar-now">
+      <div class="cover-ring" id="coverRing">
+        <svg class="ring bar-ring" viewBox="-100 -100 200 200" data-bars="40" data-r="70" data-len="22"></svg>
+        <img id="barCover" alt="">
+      </div>
+      <div class="bar-meta">
+        <div class="bar-title" id="barTitle">—</div>
+        <div class="bar-artist" id="barArtist"></div>
+      </div>
+      <button class="icon-btn like-btn" id="barLike" title="Like (L)"><svg><use href="#i-heart"/></svg></button>
+    </div>
+    <div class="bar-center">
+      <div class="controls">
+        <button class="icon-btn" id="btnShuffle" title="Shuffle"><svg><use href="#i-shuffle"/></svg></button>
+        <button class="icon-btn" id="btnPrev" title="Previous (Ctrl+←)"><svg><use href="#i-prev"/></svg></button>
+        <button class="play-btn" id="btnPlay" title="Play (Space)"><svg class="ic-play"><use href="#i-play"/></svg><svg class="ic-pause"><use href="#i-pause"/></svg></button>
+        <button class="icon-btn" id="btnNext" title="Next (Ctrl+→)"><svg><use href="#i-next"/></svg></button>
+        <button class="icon-btn" id="btnRepeat" title="Repeat"><svg><use href="#i-repeat"/></svg><b class="one">1</b></button>
+      </div>
+      <div class="progress">
+        <span id="tCur">0:00</span>
+        <div class="slider" id="seek"><div class="track"><div class="buffer" id="seekBuf"></div><div class="fill" id="seekFill"></div></div><div class="knob" id="seekKnob"></div><div class="hover-time" id="seekHover"></div></div>
+        <span id="tDur">0:00</span>
+      </div>
+    </div>
+    <div class="bar-end">
+      <button class="icon-btn" id="btnQueue" title="Queue"><svg><use href="#i-queue"/></svg></button>
+      <button class="icon-btn" id="btnPanel" title="Show or hide video and queue"><svg><use href="#i-panel"/></svg></button>
+      <button class="icon-btn" id="btnMute" title="Mute (M)"><svg><use href="#i-vol"/></svg></button>
+      <div class="slider vol" id="vol"><div class="track"><div class="fill" id="volFill"></div></div><div class="knob" id="volKnob"></div></div>
+    </div>
+  </footer>
+</div>
+
+<div class="menu" id="menu" role="menu"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<dialog class="dlg" id="dlg"><form method="dialog" id="dlgForm"><h3 id="dlgTitle"></h3><input id="dlgInput" maxlength="80" autocomplete="off"><div class="dlg-actions"><button value="cancel" class="btn ghost">Cancel</button><button value="ok" class="btn primary" id="dlgOk">Save</button></div></form></dialog>
+
+<script src="https://www.youtube.com/iframe_api" async></script>
+<script src="app.js"></script>
+</body>
+</html>
