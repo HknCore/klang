@@ -35,13 +35,30 @@ if os.name == "nt":
 a = Analysis(
     ["server.py"],
     datas=datas,
-    excludes=["tkinter"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)
+
+# Start screen shown the moment Klang.exe is opened, while it unpacks itself.
+# Needs Tcl/Tk, which the official Windows Python includes.
+try:
+    import tkinter  # noqa: F401
+    splash = Splash(
+        "packaging/splash.png",
+        binaries=a.binaries,
+        datas=a.datas,
+        text_pos=None,
+        always_on_top=False,
+    )
+    splash_parts = [splash, splash.binaries]
+except ImportError:
+    print("tkinter not available: building without start screen")
+    splash_parts = []
+
 exe = EXE(
     pyz,
     a.scripts,
+    *splash_parts,
     a.binaries,
     a.datas,
     name="Klang",

@@ -650,6 +650,20 @@ class Handler(BaseHTTPRequestHandler):
 # Startup
 # ----------------------------------------------------------------------------
 
+try:
+    import pyi_splash  # only present in Klang.exe: the start screen shown while it unpacks
+except ImportError:
+    pyi_splash = None
+
+
+def close_splash():
+    if pyi_splash:
+        try:
+            pyi_splash.close()
+        except Exception:
+            pass
+
+
 def find_edge():
     candidates = [
         os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
@@ -662,14 +676,57 @@ def find_edge():
     return shutil.which("msedge") or shutil.which("microsoft-edge")
 
 
-def open_window(url):
+def open_browser_window(url):
+    """Fallback when no native window is possible: an Edge app window, else the default browser."""
     edge = find_edge()
     if edge:
-        # App mode: its own window without an address bar. Uses your Edge profile,
-        # so if you're signed in to YouTube Premium there, you get no ads.
         subprocess.Popen([edge, f"--app={url}", "--window-size=1320,840"], close_fds=True)
     else:
         webbrowser.open(url)
+    threading.Timer(1.5, close_splash).start()
+
+
+def style_title_bar(window):
+    """Windows 11: paint the title bar in Klang's graphite so it blends with the app."""
+    try:
+        import ctypes
+
+        hwnd = window.native.Handle.ToInt32()
+        dwm = ctypes.windll.dwmapi
+        for attr, value in ((20, 1), (35, 0x00231E1D), (36, 0x00F2EBEC)):  # dark mode, caption, text
+            v = ctypes.c_int(value)
+            dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), 4)
+    except Exception as e:  # older Windows versions simply keep the default title bar
+        print(f"[title bar] {e}")
+
+
+def run_native_window(url):
+    """Open Klang in its own app window (WebView2). Returns False if that isn't possible."""
+    try:
+        import webview
+    except Exception as e:
+        print(f"[window] pywebview unavailable: {e}")
+        return False
+    try:
+        window = webview.create_window(
+            "Klang", url, width=1320, height=840, min_size=(900, 620),
+            background_color="#1d1e23", text_select=False,
+        )
+
+        def on_shown():
+            close_splash()
+            style_title_bar(window)
+
+        window.events.shown += on_shown
+        webview.start(
+            gui="edgechromium" if os.name == "nt" else None,
+            private_mode=False,  # keep settings and queue between sessions
+            storage_path=str(DATA_DIR / "webview"),
+        )
+        return True
+    except Exception as e:
+        print(f"[window] native window failed: {e}")
+        return False
 
 
 def port_in_use():
@@ -678,7 +735,7 @@ def port_in_use():
 
 
 def watchdog(server):
-    """Shut the server down once the window has been closed for 25 seconds."""
+    """Browser fallback only: shut down once the window has been closed for 25 seconds."""
     while True:
         time.sleep(5)
         if time.time() - _last_ping > 25:
@@ -690,22 +747,35 @@ def watchdog(server):
 def main():
     url = f"http://{HOST}:{PORT}/"
     if port_in_use():
-        # Already running: just open another window
-        if not NO_WINDOW:
-            open_window(url)
+        # Already running: just open another window onto the same library
+        if not NO_WINDOW and not run_native_window(url):
+            open_browser_window(url)
+        close_splash()
         return
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     server.daemon_threads = True
     print(f"Klang is running at {url}" + ("  (demo mode)" if MOCK else ""))
+
+    if NO_WINDOW:
+        close_splash()
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        return
+
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    if run_native_window(url):
+        server.shutdown()  # the window was closed: quit
+        return
+
+    # No native window available: use the browser and quit when it goes quiet
+    open_browser_window(url)
     if not NO_AUTOEXIT:
-        threading.Thread(target=watchdog, args=(server,), daemon=True).start()
-    if not NO_WINDOW:
-        threading.Timer(0.3, open_window, args=(url,)).start()
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        watchdog(server)
+    else:
+        threading.Event().wait()
 
 
 if __name__ == "__main__":

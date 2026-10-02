@@ -215,7 +215,7 @@ body.playing .brand-ring { animation-duration: 7s; }
   box-shadow: 0 1px 0 #2a2b31;
 }
 .hist { display: flex; gap: 4px; }
-.topbar-end { width: 72px; }
+.topbar-end { width: 72px; display: flex; justify-content: flex-end; }
 
 .icon-btn {
   position: relative;
@@ -750,8 +750,6 @@ body.playing #seekFill { background: linear-gradient(90deg, var(--accent-deep), 
   .track .idx, .track .d, .list-head .c-idx, .list-head .c-d { display: none; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
-  .splash-ring line { opacity: 1; transform: scaleY(var(--s, 1)); }
-  .wordmark span { opacity: 1; filter: none; transform: none; }
-}
+/* Settings → "Turn animations off" */
+body.calm *, body.calm *::before, body.calm *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+body.calm .eq i { transform: scaleY(.6); }

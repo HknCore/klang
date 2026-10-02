@@ -11,7 +11,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const h = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fmtTime = (s) => { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60); return `${m}:${String(s % 60).padStart(2, "0")}`; };
-const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+// Animations are on by default (even when Windows has "Animation effects" turned off);
+// they can be switched off in the settings menu.
+const calm = () => state.settings.animations === false;
 
 /* ---------------------------------------------------------------- API --- */
 const api = {
@@ -81,8 +83,8 @@ function animateRings(ts) {
   ringT = t;
   for (const ring of rings) {
     if (ring.svg.classList.contains("splash-ring")) continue;
-    const target = state.playing ? 1 : 0;
-    ring.level += (target - ring.level) * Math.min(1, dt * 4);
+    const target = state.playing && !calm() ? 1 : 0;
+    ring.level = calm() ? target : ring.level + (target - ring.level) * Math.min(1, dt * 4);
     if (ring.level < 0.002 && ring._still) continue;
     ring._still = ring.level < 0.002;
     ring.lines.forEach((line, i) => {
@@ -98,7 +100,8 @@ function animateRings(ts) {
 /* ------------------------------------------------------------- Splash --- */
 async function boot() {
   $$(".ring").forEach(buildRing);
-  if (!reducedMotion) requestAnimationFrame(animateRings);
+  document.body.classList.toggle("calm", calm());
+  requestAnimationFrame(animateRings);
   document.body.classList.add("booting");
   const started = performance.now();
   const status = $(".splash-status");
@@ -257,7 +260,7 @@ function navigate(route, { replace = false, fromHistory = false } = {}) {
     render(route);
     if (isNewView || fromHistory) scroller.scrollTop = restore;
   };
-  if (isNewView && document.startViewTransition && !reducedMotion) document.startViewTransition(draw);
+  if (isNewView && document.startViewTransition && !calm()) document.startViewTransition(draw);
   else draw();
 }
 
@@ -1068,7 +1071,7 @@ function removeFromQueue(i) {
     if (i < state.index) state.index--;
     renderQueue(); persist();
   };
-  if (li && !reducedMotion) { li.classList.add("leave"); setTimeout(finish, 280); } else finish();
+  if (li && !calm()) { li.classList.add("leave"); setTimeout(finish, 280); } else finish();
 }
 
 async function startRadio(track) {
@@ -1258,6 +1261,24 @@ function initUI() {
     navigate({ name: b.dataset.nav });
   });
   $("#newPlaylist").onclick = () => createPlaylist([]);
+  $("#btnSettings").onclick = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    openMenu(r.right - 240, r.bottom + 8, [
+      { label: "Settings", heading: true },
+      { label: calm() ? "Turn animations on" : "Turn animations off", icon: "sparkle", action: () => {
+        state.settings.animations = calm();
+        document.body.classList.toggle("calm", calm());
+        persist();
+        toast(calm() ? "Animations off" : "Animations on");
+      } },
+      { label: state.settings.autoRadio ? "Stop autoplay of similar songs" : "Autoplay similar songs", icon: "radio", action: () => {
+        state.settings.autoRadio = !state.settings.autoRadio;
+        $("#autoRadio").checked = state.settings.autoRadio;
+        persist(); renderQueue();
+        toast(state.settings.autoRadio ? "Autoplay on" : "Autoplay off");
+      } },
+    ], e.currentTarget);
+  };
   $("#histBack").onclick = () => goHistory(-1);
   $("#histFwd").onclick = () => goHistory(1);
 

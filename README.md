@@ -52,7 +52,7 @@ Results are split into **Songs**, **Albums**, **Artists** and **Videos**. Duplic
 <img src="docs/icons/feather.svg" width="44" alt="">
 
 ### Light on your PC
-One .exe, nothing to install. No bundled browser, no Electron: Klang runs a tiny local helper and draws its window with the Edge engine Windows already has.
+One .exe, nothing to install. No bundled browser, no Electron: Klang opens a real app window drawn by WebView2, the Edge engine that already comes with Windows.
 
 </td>
 </tr>
@@ -80,7 +80,7 @@ When your queue runs out, Klang can continue with similar songs. Start a radio f
 <img src="docs/icons/sparkle.svg" width="44" alt="">
 
 ### Made to feel good
-Graphite and lavender, smooth transitions, a breathing ring around the cover while music plays, and a short intro that sets the mood.
+Graphite and lavender, its own app window with a matching title bar, smooth transitions, a breathing ring around the cover while music plays, and a short intro that sets the mood. Prefer it calm? Switch animations off in the settings.
 
 </td>
 <td width="50%" valign="top">
@@ -220,7 +220,7 @@ No. Search and playback work without signing in. Your likes and playlists live o
 <details>
 <summary><b>Are there ads?</b></summary>
 <br>
-Klang plays music through YouTube's official embedded player, so YouTube decides about ads, just like on youtube.com. Klang opens in Microsoft Edge's app mode and uses your Edge profile, so if you're signed in to YouTube Premium in Edge, you get Premium there too.
+Klang plays music through YouTube's official embedded player, so YouTube decides about ads, just like on youtube.com.
 </details>
 
 <details>
@@ -279,7 +279,7 @@ Ideas and bug reports are welcome in the issues.
                   │  cleans up search results via ytmusicapi
                   │  stores likes and playlists in %APPDATA%\Klang
                   ▼
-              Edge app window ──▶ ui/  (plain HTML, CSS, JavaScript)
+              app window (WebView2) ──▶ ui/  (plain HTML, CSS, JavaScript)
                                    └─ plays through the official YouTube embed
 ```
 

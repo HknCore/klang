@@ -49,6 +49,24 @@ jobs:
           $res = Invoke-RestMethod "http://127.0.0.1:8777/api/search?q=glass"
           if ($res.songs.Count -lt 1) { throw "Search returned nothing" }
           taskkill /IM Klang.exe /F | Out-Null
+          Start-Sleep 2
+
+          # Normal start: Klang must open its own app window (not fall back to the browser)
+          Remove-Item "$env:APPDATA\Klang\klang.log" -ErrorAction SilentlyContinue
+          Start-Process dist\Klang.exe -ArgumentList "--mock"
+          $ok = $false
+          for ($i = 0; $i -lt 40 -and -not $ok; $i++) {
+            Start-Sleep 1
+            try { $ok = (Invoke-RestMethod http://127.0.0.1:8777/api/ping).ok } catch {}
+          }
+          Start-Sleep 8
+          $alive = @(Get-Process Klang -ErrorAction SilentlyContinue).Count -gt 0
+          $log = Get-Content "$env:APPDATA\Klang\klang.log" -Raw -ErrorAction SilentlyContinue
+          "--- klang.log ---"; $log
+          taskkill /IM Klang.exe /F | Out-Null
+          if (-not $ok -or -not $alive) { throw "Klang.exe did not keep running with a window" }
+          if ($log -match "\[window\]") { throw "The native app window could not be opened" }
+
           "Klang.exe ${env:KLANG_VERSION}: $([math]::Round((Get-Item dist\Klang.exe).Length / 1MB, 1)) MB"
 
       - uses: actions/upload-artifact@v4
