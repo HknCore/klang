@@ -1240,8 +1240,14 @@ ENGINE_JS = r"""
       if (p.getPlayerState() === 1) p.pauseVideo();
     }
     claimKeys();
+    let ps = null;
+    try {
+      const r = p.getPlayerResponse && p.getPlayerResponse();
+      const st = r && r.playabilityStatus;
+      if (st && st.status !== 'OK') ps = { status: st.status, reason: st.reason || '' };
+    } catch (e) {}
     return {
-      ready: true, id: data.video_id || null, want: K.want, s: p.getPlayerState(),
+      ready: true, id: data.video_id || null, want: K.want, s: p.getPlayerState(), ps,
       t: p.getCurrentTime ? p.getCurrentTime() : 0, d: p.getDuration ? p.getDuration() : 0,
       buf: p.getVideoLoadedFraction ? p.getVideoLoadedFraction() : 0,
       ad, ended: K.ended, err: K.err, cmds: K.cmds.splice(0),

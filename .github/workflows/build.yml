@@ -116,7 +116,7 @@ jobs:
               $st = Invoke-RestMethod http://127.0.0.1:8777/api/engine/state -Headers $h
               $ok = ($st.want -eq $song.videoId) -and ($st.s -eq 1) -and ($st.t -gt 3) -and (-not $st.ad)
             }
-            $summary = "state=$($st.s) t=$([math]::Round([double]$st.t,1)) ad=$($st.ad) err=$($st.err) needsYou=$($st.needsYou) ready=$($st.ready) url=$($st.url)"
+            $summary = "state=$($st.s) t=$([math]::Round([double]$st.t,1)) ad=$($st.ad) err=$($st.err) needsYou=$($st.needsYou) ready=$($st.ready) status=$($st.ps.status) reason=$($st.ps.reason) url=$($st.url)"
             if ($ok) { $played++; Write-Host "::notice title=Played::$($song.title) ($($song.videoId)) $summary" }
             else { Write-Host "::warning title=Not played::$($song.title) ($($song.videoId)) $summary" }
           }

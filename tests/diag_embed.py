@@ -28,4 +28,6 @@ for q in QUERIES:
         lines.append(f"error   {q}: {e!r}")
 
 print("\n".join(lines))
+for line in lines[:6]:
+    print(f"::notice title=Song status::{line}")
 print(f"::notice title=Embedded player::{blocked} of {total} popular songs are blocked in embedded players")
