@@ -63,11 +63,14 @@
       <button class="nav-item" data-nav="liked"><svg><use href="#i-heart"/></svg>Liked songs<span class="count" id="likedCount"></span></button>
       <button class="nav-item" data-nav="recent"><svg><use href="#i-clock"/></svg>Recently played</button>
     </div>
-    <div class="nav-head">
-      <span>Playlists</span>
-      <button class="icon-btn sm" id="newPlaylist" title="New playlist"><svg><use href="#i-plus"/></svg></button>
+    <div class="side-scroll">
+      <div class="nav-head">
+        <span>Playlists</span>
+        <button class="icon-btn sm" id="newPlaylist" title="New playlist"><svg><use href="#i-plus"/></svg></button>
+      </div>
+      <div class="nav-playlists" id="navPlaylists"></div>
+      <div id="ytSide"></div>
     </div>
-    <div class="nav-playlists" id="navPlaylists"></div>
   </nav>
 
   <!-- Main -->
@@ -147,10 +150,12 @@
 </div>
 
 <div class="menu" id="menu" role="menu"></div>
+<dialog class="dlg acct" id="acct"><div id="acctBody"></div></dialog>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <dialog class="dlg" id="dlg"><form method="dialog" id="dlgForm"><h3 id="dlgTitle"></h3><input id="dlgInput" maxlength="80" autocomplete="off"><div class="dlg-actions"><button value="cancel" class="btn ghost">Cancel</button><button value="ok" class="btn primary" id="dlgOk">Save</button></div></form></dialog>
 
 <script src="https://www.youtube.com/iframe_api" async></script>
+<script src="account.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

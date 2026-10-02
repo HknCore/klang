@@ -56,7 +56,8 @@ function persist() {
 }
 
 const current = () => state.queue[state.index] || null;
-const isLiked = (vid) => state.lib.liked.some((t) => t.videoId === vid);
+const isLikedHere = (vid) => state.lib.liked.some((t) => t.videoId === vid);
+const isLiked = (vid) => isLikedHere(vid) || account.liked.has(vid);
 
 /* -------------------------------------------------------------- Rings --- */
 /* A ring of radial bars. Used in the splash, the logo and around the cover. */
@@ -122,6 +123,7 @@ async function boot() {
 
   initUI();
   restoreSession();
+  loadAccount({ quiet: false });
   navigate({ name: "home" });
 
   const splash = $("#splash");
@@ -221,6 +223,10 @@ function trackMenu(track, x, y, anchor, opts = {}) {
       { label: "New playlist…", icon: "plus", action: () => createPlaylist([track]) },
       ...pls.map((p) => ({ label: p.name, icon: "list", action: () => addToPlaylist(p.id, [track]) })),
     ] },
+    ...(signedIn() && account.playlists.length ? [
+      { label: "Add to YouTube Music playlist", heading: true },
+      { group: account.playlists.map((p) => ({ label: p.title, icon: "list", action: () => addToYtPlaylist(p, [track]) })) },
+    ] : []),
     "sep",
     { label: isLiked(track.videoId) ? "Remove from liked songs" : "Add to liked songs", icon: "heart", action: () => toggleLike(track) },
   ];
@@ -277,7 +283,7 @@ function goHistory(delta) {
 function updateNav() {
   const r = state.route;
   $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.nav === r.name));
-  $$(".nav-pl").forEach((b) => b.classList.toggle("active", r.name === "playlist" && b.dataset.id === r.id));
+  $$(".nav-pl").forEach((b) => b.classList.toggle("active", (r.name === "playlist" && b.dataset.id === r.id) || (r.name === "ytplaylist" && b.dataset.yt === r.id)));
   $("#histBack").disabled = state.hpos <= 0;
   $("#histFwd").disabled = state.hpos >= state.history.length - 1;
 }
@@ -290,7 +296,8 @@ function render(route) {
   switch (route.name) {
     case "home": return done(viewHome());
     case "search": return viewSearch(route, done, token);
-    case "liked": return done(viewTrackPage({ kind: "Playlist", title: "Liked songs", tracks: state.lib.liked, mosaic: "liked", source: { label: "Liked songs", route } }));
+    case "liked": return viewLiked(route, done, token);
+    case "ytplaylist": return viewYtPlaylist(route, done, token);
     case "recent": return done(viewTrackPage({ kind: "History", title: "Recently played", tracks: state.lib.recent || [], mosaic: "recent", source: { label: "Recently played", route } }));
     case "playlist": {
       const pl = state.lib.playlists.find((p) => p.id === route.id);
@@ -346,6 +353,8 @@ function viewHome() {
     sec.append(grid);
     el.append(sec);
   }
+  const ytSec = ytHomeSection();
+  if (ytSec) el.append(ytSec);
   if (state.lib.playlists.length) {
     const sec = h(`<section class="section"><div class="section-head"><h2>Your playlists</h2></div></section>`);
     const grid = h(`<div class="grid"></div>`);
@@ -358,7 +367,7 @@ function viewHome() {
     sec.append(grid);
     el.append(sec);
   }
-  if (!recent.length && !state.lib.playlists.length) {
+  if (!recent.length && !state.lib.playlists.length && !ytSec) {
     el.append(emptyState("Your music starts with a search", "Type a song, album or artist in the search bar above. Press Ctrl+K from anywhere to jump there.", { label: "Start searching", action: () => $("#q").focus() }));
   }
   return el;
@@ -652,7 +661,12 @@ function refreshHearts() {
   const liked = cur && isLiked(cur.videoId);
   barLike.classList.toggle("liked", !!liked);
   $("use", barLike).setAttribute("href", liked ? "#i-heart-f" : "#i-heart");
-  $("#likedCount").textContent = state.lib.liked.length || "";
+  updateLikedCount();
+}
+
+function updateLikedCount() {
+  const ids = new Set([...state.lib.liked.map((t) => t.videoId), ...account.liked]);
+  $("#likedCount").textContent = ids.size || "";
 }
 
 /* Track pages (liked, recent, playlists) ------------------------------- */
@@ -758,14 +772,20 @@ function heroSkeleton(round) {
 /* ------------------------------------------------------------- Library --- */
 async function toggleLike(track) {
   if (!track) return;
+  const like = !isLiked(track.videoId);
   try {
-    const r = await api.send("POST", "/api/like", { track });
-    if (r.liked) state.lib.liked.unshift(track);
-    else state.lib.liked = state.lib.liked.filter((t) => t.videoId !== track.videoId);
+    // Klang's own list (works offline and without an account)
+    if (isLikedHere(track.videoId) !== like) {
+      const r = await api.send("POST", "/api/like", { track });
+      if (r.liked) state.lib.liked.unshift(track);
+      else state.lib.liked = state.lib.liked.filter((t) => t.videoId !== track.videoId);
+    }
+    // Your YouTube likes, when signed in
+    await setYtLike(track, like);
     refreshHearts();
-    toast(r.liked ? "Added to liked songs" : "Removed from liked songs");
+    toast(like ? "Added to liked songs" : "Removed from liked songs");
     if (state.route.name === "liked") navigate(state.route, { replace: true });
-  } catch (e) { toast(e.message, true); }
+  } catch (e) { refreshHearts(); toast(e.message, true); }
 }
 
 async function createPlaylist(tracks = [], name = "") {
@@ -853,7 +873,7 @@ function renderSidebar() {
     b.addEventListener("drop", (e) => { e.preventDefault(); b.classList.remove("drop"); if (dragData) addToPlaylist(p.id, dragData.tracks); });
     nav.append(b);
   }
-  $("#likedCount").textContent = state.lib.liked.length || "";
+  updateLikedCount();
   if (state.route) updateNav();
 }
 
@@ -1261,24 +1281,7 @@ function initUI() {
     navigate({ name: b.dataset.nav });
   });
   $("#newPlaylist").onclick = () => createPlaylist([]);
-  $("#btnSettings").onclick = (e) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    openMenu(r.right - 240, r.bottom + 8, [
-      { label: "Settings", heading: true },
-      { label: calm() ? "Turn animations on" : "Turn animations off", icon: "sparkle", action: () => {
-        state.settings.animations = calm();
-        document.body.classList.toggle("calm", calm());
-        persist();
-        toast(calm() ? "Animations off" : "Animations on");
-      } },
-      { label: state.settings.autoRadio ? "Stop autoplay of similar songs" : "Autoplay similar songs", icon: "radio", action: () => {
-        state.settings.autoRadio = !state.settings.autoRadio;
-        $("#autoRadio").checked = state.settings.autoRadio;
-        persist(); renderQueue();
-        toast(state.settings.autoRadio ? "Autoplay on" : "Autoplay off");
-      } },
-    ], e.currentTarget);
-  };
+  $("#btnSettings").onclick = (e) => openSettings(e.currentTarget);
   $("#histBack").onclick = () => goHistory(-1);
   $("#histFwd").onclick = () => goHistory(1);
 

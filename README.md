@@ -61,8 +61,8 @@ One .exe, nothing to install. No bundled browser, no Electron: Klang opens a rea
 
 <img src="docs/icons/heart.svg" width="44" alt="">
 
-### Your library, on your machine
-Like songs, build playlists, drag and drop to reorder. Everything is saved in one small file on your computer. No sign-up, no sync, no tracking.
+### Your YouTube Music library, built in
+Sign in with YouTube and your playlists and liked songs show up right away. Likes sync both ways. Prefer not to sign in? Klang keeps its own likes and playlists on your computer.
 
 </td>
 <td width="50%" valign="top">
@@ -123,6 +123,13 @@ Graphite and lavender, its own app window with a matching title bar, smooth tran
 </table>
 
 <br>
+
+<h3 align="center">Bring your library with you</h3>
+<p align="center">Sign in once and your YouTube Music playlists and likes are right there in the sidebar.<br>Songs you liked in Klang before signing in can be added to YouTube with one click.</p>
+
+<img src="docs/screens/10-youtube-library.png" alt="Liked songs synced with YouTube Music and the YouTube Music playlists in the sidebar" width="100%">
+
+<br><br>
 
 <h3 align="center">Everything one right-click away</h3>
 <p align="center">Play next, add to queue, start a radio, add to a playlist, jump to the album or artist.</p>
@@ -214,13 +221,21 @@ To build the exe yourself: `pip install pyinstaller`, then `pyinstaller klang.sp
 <details>
 <summary><b>Do I need a YouTube or Google account?</b></summary>
 <br>
-No. Search and playback work without signing in. Your likes and playlists live on your computer.
+No. Search and playback work without signing in, and Klang keeps its own likes and playlists on your computer. Signing in adds your YouTube Music playlists and likes.
+</details>
+
+<details>
+<summary><b>How does signing in work? Is it safe?</b></summary>
+<br>
+Click <b>Sign in with YouTube</b> in the sidebar. Google's own sign-in page opens in a Klang window, so Klang never sees your password. After you sign in, Klang keeps the YouTube session on your computer only (in <code>%APPDATA%\Klang</code>), the same way your browser does. <b>Sign out</b> in the account menu removes it.
+<br><br>
+If Google says the browser or app may not be secure, choose <b>Use another way</b>: Klang walks you through copying the sign-in from your regular browser. It takes about a minute.
 </details>
 
 <details>
 <summary><b>Are there ads?</b></summary>
 <br>
-Klang plays music through YouTube's official embedded player, so YouTube decides about ads, just like on youtube.com.
+Klang plays music through YouTube's official embedded player, so YouTube decides about ads, just like on youtube.com. If you signed in through the Klang window with a Premium account, the player knows you too.
 </details>
 
 <details>
@@ -253,7 +268,7 @@ Yes. Run <code>Klang.exe --mock</code> (or <code>python server.py --mock</code>)
 
 <img src="docs/icons/lock.svg" width="44" align="left" alt="">
 
-Klang only listens on your own computer (`127.0.0.1`), never on your network. It collects nothing and phones home to no one. The only outside connections are to YouTube Music, to fetch search results and play music. When you close the window, Klang shuts itself down.
+Klang only listens on your own computer (`127.0.0.1`), never on your network. It collects nothing and phones home to no one. The only outside connections are to YouTube Music, to fetch search results, play music and, if you signed in, read and update your library. When you close the window, Klang shuts itself down.
 
 <br clear="left">
 
@@ -262,7 +277,7 @@ Klang only listens on your own computer (`127.0.0.1`), never on your network. It
 ## 🗺 What's next
 
 - [ ] Import playlists from Spotify
-- [ ] Sign in to see your YouTube Music library and playlists
+- [x] Sign in to see your YouTube Music library and playlists
 - [ ] Mini player that stays on top
 - [ ] Tray icon and media keys when the window is in the background
 - [x] One .exe, no Python needed

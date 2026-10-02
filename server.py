@@ -61,17 +61,46 @@ NO_AUTOEXIT = "--no-autoexit" in sys.argv or NO_WINDOW
 # ----------------------------------------------------------------------------
 
 _yt_local = threading.local()
+AUTH_FILE = DATA_DIR / "youtube-account.json"
+_auth = {"headers": None, "version": 0}
+_auth_lock = threading.Lock()
 
 
-def yt():
-    """One YTMusic client per thread (the library is not thread-safe)."""
-    inst = getattr(_yt_local, "inst", None)
+def load_auth():
+    try:
+        _auth["headers"] = json.loads(AUTH_FILE.read_text("utf-8"))
+    except Exception:
+        _auth["headers"] = None
+
+
+def yt(anonymous=False):
+    """One YTMusic client per thread (the library is not thread-safe).
+    Signed in, it uses your YouTube account: personal results and your library."""
+    from ytmusicapi import YTMusic
+
+    use_auth = bool(_auth["headers"]) and not anonymous
+    key = (use_auth, _auth["version"] if use_auth else 0)
+    cache = getattr(_yt_local, "clients", None)
+    if cache is None:
+        cache = _yt_local.clients = {}
+    inst = cache.get(key)
     if inst is None:
-        from ytmusicapi import YTMusic
-
-        inst = YTMusic(language="en", location="CH")
-        _yt_local.inst = inst
+        auth = dict(_auth["headers"]) if use_auth else None
+        inst = YTMusic(auth=auth, language="en", location="CH")
+        for old in [k for k in cache if k[0] and k != key]:  # drop clients of a previous sign-in
+            cache.pop(old)
+        cache[key] = inst
     return inst
+
+
+def with_yt(fn):
+    """Run fn with your account; if that fails (e.g. the sign-in expired), try without it."""
+    try:
+        return fn(yt())
+    except Exception:
+        if not _auth["headers"]:
+            raise
+        return fn(yt(anonymous=True))
 
 
 def big_thumb(thumbs, size=544):
@@ -220,7 +249,7 @@ def search_all(query, hide_variants=True):
 
     def run(flt):
         try:
-            return yt().search(query, filter=flt, limit=25)
+            return with_yt(lambda c: c.search(query, filter=flt, limit=25))
         except Exception as e:  # one failing category must not break the search
             print(f"[search:{flt}] {e}", file=sys.stderr)
             failed.append(e)
@@ -249,7 +278,7 @@ def search_all(query, hide_variants=True):
 
 
 def get_album(browse_id):
-    a = yt().get_album(browse_id)
+    a = with_yt(lambda c: c.get_album(browse_id))
     thumb = big_thumb(a.get("thumbnails"))
     alb = {"name": a.get("title"), "id": browse_id}
     tracks = [t for t in (norm_track(x, alb, thumb) for x in a.get("tracks", [])) if t]
@@ -269,7 +298,7 @@ def get_album(browse_id):
 
 
 def get_artist(browse_id):
-    a = yt().get_artist(browse_id)
+    a = with_yt(lambda c: c.get_artist(browse_id))
     songs = [t for t in map(norm_track, (a.get("songs") or {}).get("results", [])) if t]
     albums = [x for x in map(norm_album, (a.get("albums") or {}).get("results", [])) if x]
     singles = [x for x in map(norm_album, (a.get("singles") or {}).get("results", [])) if x]
@@ -286,22 +315,158 @@ def get_artist(browse_id):
 
 
 def get_radio(video_id):
-    w = yt().get_watch_playlist(videoId=video_id, radio=True, limit=30)
+    w = with_yt(lambda c: c.get_watch_playlist(videoId=video_id, radio=True, limit=30))
     tracks = [t for t in map(norm_track, w.get("tracks", [])) if t]
     return [t for t in tracks if t["videoId"] != video_id]
 
 
 def get_alternatives(title, artists):
     """Fallback videos when a song may not be embedded (player error 101/150)."""
-    res = yt().search(f"{artists} {title}", filter="videos", limit=8)
+    res = with_yt(lambda c: c.search(f"{artists} {title}", filter="videos", limit=8))
     return [t for t in map(norm_track, res) if t]
 
 
 def get_suggestions(query):
     try:
-        return yt().get_search_suggestions(query)[:7]
+        return yt(anonymous=True).get_search_suggestions(query)[:7]
     except Exception:
         return []
+
+
+# --- YouTube account --------------------------------------------------------
+# Klang signs in the same way a browser does: with the cookies of a signed-in
+# YouTube Music session. They are stored only in DATA_DIR/youtube-account.json.
+
+COOKIE_DOMAINS = (".youtube.com", "youtube.com", "music.youtube.com", "www.youtube.com")
+
+
+def auth_headers_from_cookie(cookie, authuser="0"):
+    from ytmusicapi.helpers import initialize_headers
+
+    headers = dict(initialize_headers())
+    headers.update({
+        "cookie": cookie.strip(),
+        "x-goog-authuser": str(authuser or "0"),
+        "origin": "https://music.youtube.com",
+        "x-origin": "https://music.youtube.com",
+        "authorization": "SAPISIDHASH 0_0",  # marks browser auth; recomputed on every request
+    })
+    return headers
+
+
+def parse_pasted_headers(text):
+    """Accepts request headers copied from a browser: raw headers, "Copy as fetch" or "Copy as cURL"."""
+    text = (text or "").strip()
+    patterns = [
+        r'"cookie"\s*:\s*"((?:[^"\\]|\\.)+)"',          # Copy as fetch / JSON
+        r"(?im)^\s*cookie\s*:\s*(.+?)\s*$",              # raw headers (Firefox, Chrome)
+        r"-H\s+[\'\"]cookie:\s*([^\'\"]+)[\'\"]",       # Copy as cURL (bash)
+        r"(?:-b|--cookie)\s+[\'\"]([^\'\"]+)[\'\"]",       # Copy as cURL (newer Chrome)
+        r"(?im)^\s*cookie\s*\n\s*(.+?)\s*$",            # Chrome "copy request headers" pairs
+    ]
+    cookie = None
+    for pat in patterns:
+        m = re.search(pat, text)
+        if m and "SAPISID" in m.group(1):
+            cookie = m.group(1).replace('\\"', '"')
+            break
+    if not cookie and "=" in text and ";" in text and "SAPISID" in text and "\n" not in text:
+        cookie = text  # just the cookie value
+    if not cookie:
+        raise ValueError("No YouTube cookie found. Copy the request headers of a music.youtube.com request (see the steps).")
+    if "__Secure-3PAPISID=" not in cookie:
+        raise ValueError("The cookie is missing __Secure-3PAPISID. Make sure you're signed in on music.youtube.com.")
+    m = re.search(r'x-goog-authuser[\'"]?\s*[:,]?\s*[\'"]?\s*(\d+)', text, re.I)
+    return auth_headers_from_cookie(cookie, m.group(1) if m else "0")
+
+
+def sign_in_with(headers):
+    """Check the credentials against YouTube Music, then store them."""
+    from ytmusicapi import YTMusic
+
+    info = YTMusic(auth=dict(headers), language="en", location="CH").get_account_info()
+    if not info or not info.get("accountName"):
+        raise ValueError("YouTube didn't accept this sign-in. Try signing in again.")
+    with _auth_lock:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        AUTH_FILE.write_text(json.dumps(headers), "utf-8")
+        _auth["headers"] = headers
+        _auth["version"] += 1
+    clear_cache()
+    return account_summary(info)
+
+
+def sign_out():
+    with _auth_lock:
+        AUTH_FILE.unlink(missing_ok=True)
+        _auth["headers"] = None
+        _auth["version"] += 1
+    clear_cache()
+
+
+def account_summary(info):
+    return {
+        "signedIn": True,
+        "name": info.get("accountName") or "",
+        "handle": info.get("channelHandle") or "",
+        "photo": info.get("accountPhotoUrl") or "",
+    }
+
+
+def get_account():
+    if not _auth["headers"]:
+        return {"signedIn": False}
+    return account_summary(yt().get_account_info())
+
+
+def norm_playlist(p):
+    pid = p.get("playlistId") or p.get("id")
+    if not pid:
+        return None
+    count = p.get("count") or p.get("trackCount") or ""
+    return {"id": pid, "title": p.get("title") or "", "count": str(count), "thumb": big_thumb(p.get("thumbnails"))}
+
+
+def get_yt_playlists():
+    out = []
+    for p in yt().get_library_playlists(limit=None):
+        n = norm_playlist(p)
+        if n and n["id"] not in ("LM", "SE"):  # liked music and episodes have their own places
+            out.append(n)
+    return out
+
+
+def playlist_payload(pl, pid):
+    thumb = big_thumb(pl.get("thumbnails"))
+    tracks = [t for t in map(norm_track, pl.get("tracks") or []) if t]
+    for raw, t in zip([x for x in pl.get("tracks") or [] if x.get("videoId")], tracks):
+        t["setVideoId"] = raw.get("setVideoId")
+    author = pl.get("author")
+    if isinstance(author, dict):
+        author = author.get("name")
+    return {"id": pid, "title": pl.get("title") or "", "author": author or "", "thumb": thumb,
+            "count": pl.get("trackCount") or len(tracks), "tracks": tracks}
+
+
+def get_yt_playlist(pid):
+    return playlist_payload(yt().get_playlist(pid, limit=None), pid)
+
+
+def get_yt_liked():
+    return playlist_payload(yt().get_liked_songs(limit=5000), "LM")
+
+
+def rate(video_id, like):
+    from ytmusicapi.models.content.enums import LikeStatus
+
+    yt().rate_song(video_id, LikeStatus.LIKE if like else LikeStatus.INDIFFERENT)
+    clear_cache(("yl",))
+
+
+def add_to_yt_playlist(pid, video_ids):
+    res = yt().add_playlist_items(pid, video_ids, duplicates=False)
+    clear_cache(("yp", "yl"))
+    return res
 
 
 # ----------------------------------------------------------------------------
@@ -387,6 +552,39 @@ def mock_artist(aid):
             "description": "", "songs": songs, "albums": mock_search(name)["albums"][:2], "singles": []}
 
 
+_mock_account = {"signedIn": False}
+_mock_liked = set()
+
+
+def mock_login():
+    _login.update(state="open", error="")
+
+    def finish():
+        time.sleep(2.5)
+        _mock_account.update(signedIn=True, name="Alex Rivera", handle="@alexrivera", photo=_mock_thumb("alex"))
+        _mock_liked.update({"mock0000000", "mock0000002", "mock0000005"})
+        _login.update(state="done")
+
+    threading.Thread(target=finish, daemon=True).start()
+
+
+def mock_yt_playlists():
+    names = [("Road trip", 24), ("Rainy Sunday", 17), ("Gym", 31), ("Discover Weekly finds", 12), ("Focus flow", 40)]
+    return [{"id": f"PLmock{i}", "title": n, "count": str(c), "thumb": _mock_thumb(n)} for i, (n, c) in enumerate(names)]
+
+
+def mock_yt_playlist(pid):
+    pl = next((p for p in mock_yt_playlists() if p["id"] == pid), None) or {"id": pid, "title": "Playlist", "thumb": ""}
+    order = _MOCK_SONGS[int(pid[-1]) % 3:] + _MOCK_SONGS[:int(pid[-1]) % 3] if pid[-1].isdigit() else _MOCK_SONGS
+    tracks = [_mock_track(_MOCK_SONGS.index(t), t) for t in order if "(" not in t[0]]
+    return {"id": pid, "title": pl["title"], "author": "Alex Rivera", "thumb": pl["thumb"], "count": len(tracks), "tracks": tracks}
+
+
+def mock_yt_liked():
+    tracks = [_mock_track(i, t) for i, t in enumerate(_MOCK_SONGS) if f"mock{i:07d}" in _mock_liked]
+    return {"id": "LM", "title": "Liked music", "author": "Alex Rivera", "thumb": "", "count": len(tracks), "tracks": tracks}
+
+
 # ----------------------------------------------------------------------------
 # Library: your playlists + liked songs (stored locally as JSON)
 # ----------------------------------------------------------------------------
@@ -439,6 +637,13 @@ def find_playlist(lib, pid):
 _last_ping = time.time()
 _cache: dict = {}
 _cache_lock = threading.Lock()
+
+
+def clear_cache(prefixes=None):
+    with _cache_lock:
+        for k in list(_cache):
+            if prefixes is None or (isinstance(k, tuple) and k[0] in prefixes):
+                _cache.pop(k, None)
 
 
 def cached(key, ttl, fn):
@@ -535,6 +740,32 @@ class Handler(BaseHTTPRequestHandler):
                 if MOCK:
                     return self.send_json([])
                 return self.send_json(get_alternatives(q.get("title", ""), q.get("artists", "")))
+            if p == "/api/account":
+                if MOCK:
+                    return self.send_json({**_mock_account, "login": _login["state"], "loginError": "", "canWindow": True})
+                try:
+                    acct = cached(("acct", _auth["version"]), 300, get_account)
+                except Exception as e:
+                    print(f"[account] {e!r}")
+                    acct = {"signedIn": bool(_auth["headers"]), "name": "", "photo": "", "problem": True}
+                return self.send_json({**acct, "login": _login["state"], "loginError": _login["error"],
+                                       "canWindow": _native["window"] is not None})
+            if p == "/api/yt/playlists":
+                if MOCK:
+                    return self.send_json(mock_yt_playlists() if _mock_account["signedIn"] else [])
+                if not _auth["headers"]:
+                    return self.send_json([])
+                return self.send_json(cached(("yp", _auth["version"]), 120, get_yt_playlists))
+            if p == "/api/yt/playlist":
+                if MOCK:
+                    return self.send_json(mock_yt_playlist(q["id"]))
+                return self.send_json(cached(("yp", _auth["version"], q["id"]), 120, lambda: get_yt_playlist(q["id"])))
+            if p == "/api/yt/liked":
+                if MOCK:
+                    return self.send_json(mock_yt_liked())
+                if not _auth["headers"]:
+                    return self.send_json({"tracks": []})
+                return self.send_json(cached(("yl", _auth["version"]), 120, get_yt_liked))
             if p == "/api/library":
                 with _lib_lock:
                     return self.send_json(load_library())
@@ -549,6 +780,50 @@ class Handler(BaseHTTPRequestHandler):
         p = urlparse(self.path).path
         try:
             data = self.body()
+            if p == "/api/account/login":
+                if MOCK:
+                    mock_login()
+                    return self.send_json({"mode": "window"})
+                if _native["window"] is None:
+                    return self.send_json({"mode": "paste"})
+                open_login_window()
+                return self.send_json({"mode": "window"})
+            if p == "/api/account/paste":
+                if MOCK:
+                    raise ValueError("Pasting isn't available in demo mode.")
+                return self.send_json(sign_in_with(parse_pasted_headers(data.get("text", ""))))
+            if p == "/api/account/logout":
+                if MOCK:
+                    _mock_account.clear(); _mock_account["signedIn"] = False
+                else:
+                    sign_out()
+                    if _native["window"] is not None:
+                        try:
+                            _native["window"].clear_cookies()  # also sign the player out
+                        except Exception as e:
+                            print(f"[sign-out] {e!r}")
+                _login.update(state="idle", error="")
+                return self.send_json({"ok": True})
+            if p == "/api/yt/rate":
+                if MOCK:
+                    (_mock_liked.add if data.get("like") else _mock_liked.discard)(data["videoId"])
+                else:
+                    rate(data["videoId"], bool(data.get("like")))
+                return self.send_json({"ok": True})
+            if p == "/api/yt/rate-many":
+                ids = [v for v in data.get("videoIds", []) if isinstance(v, str)][:500]
+                done = 0
+                for vid in ids:
+                    if MOCK:
+                        _mock_liked.add(vid)
+                    else:
+                        rate(vid, True)
+                    done += 1
+                return self.send_json({"liked": done})
+            if p == "/api/yt/playlist/add":
+                if not MOCK:
+                    add_to_yt_playlist(data["id"], data["videoIds"])
+                return self.send_json({"ok": True})
             if p == "/api/like":
                 t = slim(data["track"])
 
@@ -602,9 +877,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_error_json(404, "Unknown path")
         except KeyError as e:
             return self.send_error_json(400, str(e))
+        except ValueError as e:
+            return self.send_error_json(400, str(e))
         except Exception as e:
             print(f"[POST {p}] {e!r}", file=sys.stderr)
-            return self.send_error_json(500, "Could not save your library.")
+            msg = "Could not save your library." if p in ("/api/like", "/api/recent") or p.startswith("/api/playlists") \
+                else "YouTube Music didn't accept that. Check your internet connection or sign in again."
+            return self.send_error_json(502 if p.startswith(("/api/yt", "/api/account")) else 500, msg)
 
     def do_PATCH(self):
         m = re.fullmatch(r"/api/playlists/(\w+)", urlparse(self.path).path)
@@ -700,6 +979,60 @@ def style_title_bar(window):
         print(f"[title bar] {e}")
 
 
+_native = {"window": None}
+_login = {"state": "idle", "error": ""}  # idle | open | done | closed | failed
+
+GOOGLE_SIGN_IN = (
+    "https://accounts.google.com/ServiceLogin?service=youtube&passive=true&continue="
+    "https%3A%2F%2Fwww.youtube.com%2Fsignin%3Faction_handle_signin%3Dtrue%26next%3D"
+    "https%253A%252F%252Fmusic.youtube.com%252F"
+)
+
+
+def open_login_window():
+    """Show Google's own sign-in page in a Klang window, then take over the YouTube session."""
+    import webview
+
+    _login.update(state="open", error="")
+    win = webview.create_window("Sign in to YouTube – Klang", GOOGLE_SIGN_IN, width=520, height=760,
+                                min_size=(420, 600), background_color="#1d1e23")
+    closed = threading.Event()
+    win.events.closed += closed.set
+    win.events.shown += lambda: style_title_bar(win)
+
+    def watch():
+        tried = None
+        while not closed.is_set():
+            time.sleep(1.2)
+            try:
+                current = win.get_current_url() or ""
+                if ".youtube.com" not in current:
+                    continue
+                jar = {}
+                for c in win.get_cookies() or []:
+                    for name, morsel in c.items():
+                        domain = (morsel["domain"] or "").lower()
+                        if not domain or domain.endswith("youtube.com"):
+                            jar[name] = morsel.value
+                if "__Secure-3PAPISID" not in jar:
+                    continue
+                cookie = "; ".join(f"{k}={v}" for k, v in jar.items())
+                if cookie == tried:
+                    continue
+                tried = cookie
+                sign_in_with(auth_headers_from_cookie(cookie))
+                _login.update(state="done")
+                win.destroy()
+                return
+            except Exception as e:
+                print(f"[sign-in] {e!r}")
+                _login.update(error=str(e))
+        if _login["state"] == "open":
+            _login.update(state="closed")
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
 def run_native_window(url):
     """Open Klang in its own app window (WebView2). Returns False if that isn't possible."""
     try:
@@ -718,6 +1051,7 @@ def run_native_window(url):
             style_title_bar(window)
 
         window.events.shown += on_shown
+        _native["window"] = window
         webview.start(
             gui="edgechromium" if os.name == "nt" else None,
             private_mode=False,  # keep settings and queue between sessions
@@ -753,6 +1087,7 @@ def main():
         close_splash()
         return
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    load_auth()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     server.daemon_threads = True
     print(f"Klang is running at {url}" + ("  (demo mode)" if MOCK else ""))
