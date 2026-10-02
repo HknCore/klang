@@ -16,15 +16,18 @@ const fmtTime = (s) => { s = Math.max(0, Math.floor(s || 0)); const m = Math.flo
 const calm = () => state.settings.animations === false;
 
 /* ---------------------------------------------------------------- API --- */
+// Secret for this session, put into the page by the local service (see server.py)
+const API_TOKEN = document.querySelector('meta[name="klang-token"]')?.content || "";
+
 const api = {
   async get(path) {
-    const r = await fetch(path);
+    const r = await fetch(path, { headers: { "X-Klang-Token": API_TOKEN } });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
     return data;
   },
   async send(method, path, body) {
-    const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    const r = await fetch(path, { method, headers: { "Content-Type": "application/json", "X-Klang-Token": API_TOKEN }, body: body ? JSON.stringify(body) : undefined });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
     return data;

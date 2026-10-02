@@ -227,9 +227,17 @@ No. Search and playback work without signing in, and Klang keeps its own likes a
 <details>
 <summary><b>How does signing in work? Is it safe?</b></summary>
 <br>
-Click <b>Sign in with YouTube</b> in the sidebar. Google's own sign-in page opens in a Klang window, so Klang never sees your password. After you sign in, Klang keeps the YouTube session on your computer only (in <code>%APPDATA%\Klang</code>), the same way your browser does. <b>Sign out</b> in the account menu removes it.
+Click <b>Sign in with YouTube</b> in the sidebar. Google's own sign-in page opens in a Klang window, so Klang never sees your password. After you sign in, Klang keeps the YouTube session on your computer, the same way a browser does:
+
+- **Encrypted.** The session is stored in <code>%APPDATA%\Klang</code>, encrypted with Windows' own data protection (DPAPI). Only your Windows user account can read it, just like your browser's cookies.
+- **Never sent anywhere else.** It only goes to YouTube Music. Klang has no servers of its own.
+- **Locked to Klang's window.** Klang's background service only accepts commands from its own window. Websites open in your browser can't talk to it.
+
+Keep in mind that a signed-in session lets whoever has it use YouTube as you, so treat your PC like you would a browser you're signed in to. <b>Sign out</b> in the account menu removes the session from your computer. To end it on Google's side as well, go to your <a href="https://myaccount.google.com/device-activity">Google account → Your devices</a>.
 <br><br>
-If Google says the browser or app may not be secure, choose <b>Use another way</b>: Klang walks you through copying the sign-in from your regular browser. It takes about a minute.
+If Google says the browser or app may not be secure, choose <b>Use another way</b>: Klang walks you through copying the sign-in from your regular browser. Only ever paste that into Klang itself, never into a website or a message, and never because someone asks you to.
+<br><br>
+Klang uses YouTube Music's unofficial interface, like other community players. That's not officially supported by Google.
 </details>
 
 <details>
@@ -268,7 +276,7 @@ Yes. Run <code>Klang.exe --mock</code> (or <code>python server.py --mock</code>)
 
 <img src="docs/icons/lock.svg" width="44" align="left" alt="">
 
-Klang only listens on your own computer (`127.0.0.1`), never on your network. It collects nothing and phones home to no one. The only outside connections are to YouTube Music, to fetch search results, play music and, if you signed in, read and update your library. When you close the window, Klang shuts itself down.
+Klang only listens on your own computer (`127.0.0.1`), never on your network, and only answers its own window: every start creates a new secret that other websites can't see. It collects nothing and phones home to no one. If you sign in, your YouTube session is stored encrypted with Windows' own data protection. The only outside connections are to YouTube Music, to fetch search results, play music and, if you signed in, read and update your library. When you close the window, Klang shuts itself down.
 
 <br clear="left">
 

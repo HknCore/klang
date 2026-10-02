@@ -13,8 +13,11 @@ Usage:  python server.py              (normal)
 
 from __future__ import annotations
 
+import base64
+import hmac
 import json
 import os
+import secrets
 import re
 import shutil
 import socket
@@ -61,16 +64,103 @@ NO_AUTOEXIT = "--no-autoexit" in sys.argv or NO_WINDOW
 # ----------------------------------------------------------------------------
 
 _yt_local = threading.local()
-AUTH_FILE = DATA_DIR / "youtube-account.json"
+AUTH_FILE = DATA_DIR / "youtube-account.dat"
+LEGACY_AUTH_FILE = DATA_DIR / "youtube-account.json"  # unencrypted, Klang 1.1.0
 _auth = {"headers": None, "version": 0}
 _auth_lock = threading.Lock()
 
 
-def load_auth():
+# --- Protecting the stored sign-in -------------------------------------------
+# On Windows the YouTube session is encrypted with DPAPI, the same protection
+# browsers use for their cookies: only your Windows user account can decrypt it.
+
+DPAPI_MAGIC = b"KLANG-DPAPI1\n"
+PLAIN_MAGIC = b"KLANG-PLAIN1\n"  # development on macOS/Linux only
+DPAPI_ENTROPY = b"Klang YouTube session v1"
+
+
+def _dpapi(data: bytes, protect: bool) -> bytes:
+    import ctypes
+    from ctypes import wintypes
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    def blob(b):
+        buf = ctypes.create_string_buffer(b, len(b))
+        return DATA_BLOB(len(b), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))), buf
+
+    crypt32, kernel32 = ctypes.windll.crypt32, ctypes.windll.kernel32
+    data_in, _keep1 = blob(data)
+    entropy, _keep2 = blob(DPAPI_ENTROPY)
+    out = DATA_BLOB()
+    UI_FORBIDDEN = 0x1
+    if protect:
+        ok = crypt32.CryptProtectData(ctypes.byref(data_in), ctypes.c_wchar_p("Klang"), ctypes.byref(entropy),
+                                      None, None, UI_FORBIDDEN, ctypes.byref(out))
+    else:
+        ok = crypt32.CryptUnprotectData(ctypes.byref(data_in), None, ctypes.byref(entropy),
+                                        None, None, UI_FORBIDDEN, ctypes.byref(out))
+    if not ok:
+        raise OSError(f"DPAPI failed ({ctypes.GetLastError()})")
     try:
-        _auth["headers"] = json.loads(AUTH_FILE.read_text("utf-8"))
-    except Exception:
-        _auth["headers"] = None
+        return ctypes.string_at(out.pbData, out.cbData)
+    finally:
+        kernel32.LocalFree(ctypes.cast(out.pbData, ctypes.c_void_p))
+
+
+def protect_secret(data: bytes) -> bytes:
+    if os.name == "nt":
+        return DPAPI_MAGIC + base64.b64encode(_dpapi(data, True))
+    return PLAIN_MAGIC + base64.b64encode(data)
+
+
+def unprotect_secret(raw: bytes) -> bytes:
+    if raw.startswith(DPAPI_MAGIC):
+        return _dpapi(base64.b64decode(raw[len(DPAPI_MAGIC):]), False)
+    if raw.startswith(PLAIN_MAGIC) and os.name != "nt":
+        return base64.b64decode(raw[len(PLAIN_MAGIC):])
+    raise ValueError("Unknown sign-in file format")
+
+
+def wipe(path: Path):
+    """Overwrite a file before deleting it, so the old contents don't linger on disk."""
+    try:
+        size = path.stat().st_size
+        with open(path, "r+b") as f:
+            f.write(secrets.token_bytes(max(size, 1)))
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError:
+        pass
+    path.unlink(missing_ok=True)
+
+
+def save_auth_file(headers):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = AUTH_FILE.with_suffix(".tmp")
+    tmp.write_bytes(protect_secret(json.dumps(headers).encode("utf-8")))
+    if os.name != "nt":
+        os.chmod(tmp, 0o600)
+    os.replace(tmp, AUTH_FILE)
+
+
+def load_auth():
+    _auth["headers"] = None
+    # Klang 1.1.0 stored the session unencrypted: move it into the protected file
+    if LEGACY_AUTH_FILE.exists():
+        try:
+            save_auth_file(json.loads(LEGACY_AUTH_FILE.read_text("utf-8")))
+        except Exception as e:
+            print(f"[auth] could not migrate old sign-in: {e!r}")
+        wipe(LEGACY_AUTH_FILE)
+    if not AUTH_FILE.exists():
+        return
+    try:
+        _auth["headers"] = json.loads(unprotect_secret(AUTH_FILE.read_bytes()).decode("utf-8"))
+    except Exception as e:  # e.g. copied from another PC or Windows user: sign in again
+        print(f"[auth] stored sign-in can't be read here ({type(e).__name__}); please sign in again")
+        wipe(AUTH_FILE)
 
 
 def yt(anonymous=False):
@@ -388,8 +478,7 @@ def sign_in_with(headers):
     if not info or not info.get("accountName"):
         raise ValueError("YouTube didn't accept this sign-in. Try signing in again.")
     with _auth_lock:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        AUTH_FILE.write_text(json.dumps(headers), "utf-8")
+        save_auth_file(headers)
         _auth["headers"] = headers
         _auth["version"] += 1
     clear_cache()
@@ -398,7 +487,8 @@ def sign_in_with(headers):
 
 def sign_out():
     with _auth_lock:
-        AUTH_FILE.unlink(missing_ok=True)
+        wipe(AUTH_FILE)
+        wipe(LEGACY_AUTH_FILE)
         _auth["headers"] = None
         _auth["version"] += 1
     clear_cache()
@@ -661,6 +751,19 @@ def cached(key, ttl, fn):
     return value
 
 
+# --- Who may talk to the local service ---------------------------------------
+# Only Klang's own window. A random secret is created on every start and put
+# into the page Klang serves; every API call must send it back. Other websites
+# can't read that page (the browser's same-origin rule), so they can't learn it.
+# On top of that, requests must be addressed to 127.0.0.1/localhost (blocks DNS
+# rebinding) and must not come from another site (Origin / Sec-Fetch-Site).
+
+API_TOKEN = secrets.token_urlsafe(32)
+ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
+ALLOWED_ORIGINS = {f"http://{h}" for h in ALLOWED_HOSTS}
+TOKEN_PLACEHOLDER = b"__KLANG_TOKEN__"
+
+
 MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
         ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
         ".ico": "image/x-icon", ".woff2": "font/woff2", ".json": "application/json"}
@@ -695,12 +798,35 @@ class Handler(BaseHTTPRequestHandler):
         if UI_DIR not in f.parents or not f.is_file():
             return self.send_error_json(404, "Not found")
         data = f.read_bytes()
+        is_page = f.suffix == ".html"
+        if is_page:
+            data = data.replace(TOKEN_PLACEHOLDER, API_TOKEN.encode())
         self.send_response(200)
         self.send_header("Content-Type", MIME.get(f.suffix, "application/octet-stream"))
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", "no-store" if is_page else "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if is_page:
+            self.send_header("X-Frame-Options", "DENY")  # no other site may embed Klang
+            self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.end_headers()
         self.wfile.write(data)
+
+    def guard(self, api):
+        """Reject anything that doesn't come from Klang's own window. Returns True if allowed."""
+        host = (self.headers.get("Host") or "").lower()
+        if host not in ALLOWED_HOSTS:
+            self.send_error_json(403, "Forbidden")
+            return False
+        origin = self.headers.get("Origin")
+        site = (self.headers.get("Sec-Fetch-Site") or "").lower()
+        if (origin and origin not in ALLOWED_ORIGINS) or site in ("cross-site", "same-site"):
+            self.send_error_json(403, "Forbidden")
+            return False
+        if api and not hmac.compare_digest(self.headers.get("X-Klang-Token") or "", API_TOKEN):
+            self.send_error_json(403, "Forbidden")
+            return False
+        return True
 
     # --- Routing ---
     def do_GET(self):
@@ -708,6 +834,8 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         p = u.path
+        if not self.guard(api=p.startswith("/api/")):
+            return
         try:
             if not p.startswith("/api/"):
                 return self.static(p)
@@ -778,6 +906,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p = urlparse(self.path).path
+        if not self.guard(api=True):
+            return
         try:
             data = self.body()
             if p == "/api/account/login":
@@ -886,6 +1016,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_error_json(502 if p.startswith(("/api/yt", "/api/account")) else 500, msg)
 
     def do_PATCH(self):
+        if not self.guard(api=True):
+            return
         m = re.fullmatch(r"/api/playlists/(\w+)", urlparse(self.path).path)
         if not m:
             return self.send_error_json(404, "Unknown path")
@@ -903,6 +1035,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         p = urlparse(self.path).path
+        if not self.guard(api=True):
+            return
         try:
             m = re.fullmatch(r"/api/playlists/(\w+)", p)
             if m:

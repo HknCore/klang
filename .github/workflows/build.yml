@@ -31,34 +31,42 @@ jobs:
           $v = if ("${{ github.event_name }}" -eq "release") { "${{ github.event.release.tag_name }}".TrimStart("v") } else { "0.0.0" }
           "KLANG_VERSION=$v" >> $env:GITHUB_ENV
 
+      - name: Security checks
+        run: python tests/test_security.py
+
       - name: Build
         run: pyinstaller --noconfirm klang.spec
 
       - name: Smoke test
         shell: pwsh
         run: |
-          Start-Process dist\Klang.exe -ArgumentList "--mock", "--no-window"
-          $ok = $false
-          for ($i = 0; $i -lt 30 -and -not $ok; $i++) {
-            Start-Sleep 1
-            try { $ok = (Invoke-RestMethod http://127.0.0.1:8777/api/ping).ok } catch {}
+          function Wait-Klang {
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep 1
+              try {
+                $page = Invoke-WebRequest http://127.0.0.1:8777/ -UseBasicParsing
+                if ($page.Content -match 'name="klang-token" content="([^"]+)"') { return $Matches[1] }
+              } catch {}
+            }
+            return $null
           }
-          if (-not $ok) { throw "Klang.exe did not start" }
-          $page = Invoke-WebRequest http://127.0.0.1:8777/ -UseBasicParsing
-          if ($page.StatusCode -ne 200 -or $page.Content -notmatch "klang") { throw "UI not served" }
-          $res = Invoke-RestMethod "http://127.0.0.1:8777/api/search?q=glass"
+
+          Start-Process dist\Klang.exe -ArgumentList "--mock", "--no-window"
+          $token = Wait-Klang
+          if (-not $token) { throw "Klang.exe did not start" }
+          $h = @{ "X-Klang-Token" = $token }
+          if (-not (Invoke-RestMethod http://127.0.0.1:8777/api/ping -Headers $h).ok) { throw "API not reachable" }
+          $res = Invoke-RestMethod "http://127.0.0.1:8777/api/search?q=glass" -Headers $h
           if ($res.songs.Count -lt 1) { throw "Search returned nothing" }
+          $blocked = try { Invoke-WebRequest http://127.0.0.1:8777/api/library -UseBasicParsing | Out-Null; $false } catch { $_.Exception.Response.StatusCode.value__ -eq 403 }
+          if (-not $blocked) { throw "API answered without the secret" }
           taskkill /IM Klang.exe /F | Out-Null
           Start-Sleep 2
 
           # Normal start: Klang must open its own app window (not fall back to the browser)
           Remove-Item "$env:APPDATA\Klang\klang.log" -ErrorAction SilentlyContinue
           Start-Process dist\Klang.exe -ArgumentList "--mock"
-          $ok = $false
-          for ($i = 0; $i -lt 40 -and -not $ok; $i++) {
-            Start-Sleep 1
-            try { $ok = (Invoke-RestMethod http://127.0.0.1:8777/api/ping).ok } catch {}
-          }
+          $ok = [bool](Wait-Klang)
           Start-Sleep 8
           $alive = @(Get-Process Klang -ErrorAction SilentlyContinue).Count -gt 0
           $log = Get-Content "$env:APPDATA\Klang\klang.log" -Raw -ErrorAction SilentlyContinue
