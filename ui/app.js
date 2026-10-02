@@ -115,6 +115,7 @@ async function boot() {
     try {
       const ping = await api.get("/api/ping");
       state.mock = !!ping.mock;
+      state.hostEngine = !!ping.engine;
       break;
     } catch {
       if (attempt === 6) { status.textContent = "Can't reach the Klang server. Start it again with Klang.bat."; status.classList.add("error"); }
@@ -881,8 +882,18 @@ function renderSidebar() {
 }
 
 /* ============================================================== Player === */
-/* Two interchangeable engines: the real YouTube IFrame player, and a
-   silent stand-in used in demo mode (no internet needed). */
+/* Three interchangeable engines:
+   - HostEngine: the real YouTube Music page in a hidden window, steered by
+     Klang's background service. Plays everything YouTube Music plays.
+   - YouTubeEngine: the embedded YouTube player, used when Klang runs in a
+     normal browser. Some songs are blocked there by their labels.
+   - DemoEngine: a silent stand-in for demo mode (no internet needed). */
+
+function showCoverInPanel(track) {
+  const box = $(".video-wrap .video");
+  $(".fake-video", box)?.remove();
+  box.append(h(`<div class="fake-video" style="--img:url('${esc(track?.thumb || "")}')"></div>`));
+}
 
 class YouTubeEngine {
   constructor(handlers) {
@@ -904,6 +915,7 @@ class YouTubeEngine {
     }
     this.player = new YT.Player("yt", {
       width: "100%", height: "100%",
+      host: "https://www.youtube-nocookie.com",
       playerVars: { autoplay: 1, controls: 0, rel: 0, playsinline: 1, iv_load_policy: 3, disablekb: 1, fs: 0, origin: location.origin },
       events: {
         onReady: () => {
@@ -944,9 +956,7 @@ class DemoEngine {
   load(id, autoplay = true, start = 0) {
     const tr = current();
     this.t = start; this.d = tr?.seconds || 200;
-    const box = $(".video-wrap .video");
-    $(".fake-video", box)?.remove();
-    box.append(h(`<div class="fake-video" style="--img:url('${esc(tr?.thumb || "")}')"></div>`));
+    showCoverInPanel(tr);
     this.h.onState("buffering");
     setTimeout(() => (autoplay ? this.play() : this.h.onState("paused")), 350);
   }
@@ -965,6 +975,126 @@ class DemoEngine {
   setMuted() {}
 }
 
+class HostEngine {
+  constructor(handlers) {
+    this.h = handlers;
+    this.ready = true;
+    this.st = { t: 0, d: 0, at: performance.now(), playing: false };
+    this.want = null;        // videoId we asked for
+    this.cued = null;        // restored song, loaded on first play
+    this.endedFor = null;    // videoId whose end we already reported
+    this.errFor = null;
+    this.loadStarted = 0;
+    this.volumeSent = false;
+    this.lastNeed = "";
+    this.poll();
+  }
+  cmd(cmd, args = {}) {
+    return api.send("POST", "/api/engine/cmd", { cmd, ...args }).catch((e) => toast(e.message, true));
+  }
+  meta(track) {
+    if (!track) return null;
+    const art = track.thumb && !track.thumb.startsWith("data:") ? [{ src: track.thumb, sizes: "544x544" }] : [];
+    return { title: track.title, artist: track.artists, album: track.album || "", artwork: art };
+  }
+  load(id, autoplay = true, start = 0) {
+    const tr = current();
+    showCoverInPanel(tr);
+    this.st = { t: start, d: tr?.seconds || 0, at: performance.now(), playing: false };
+    this.endedFor = null; this.errFor = null;
+    if (!autoplay) {                       // restoring the last session: don't start playing
+      this.cued = { id, start };
+      this.want = id;
+      this.h.onState("paused");
+      return;
+    }
+    this.cued = null;
+    this.want = id;
+    this.loadStarted = performance.now();
+    this.h.onState("buffering");
+    this.cmd("load", { videoId: id, start, meta: this.meta(tr) });
+  }
+  play() {
+    if (this.cued) { const c = this.cued; this.cued = null; this.load(c.id, true, c.start); return; }
+    this.restart();
+    this.cmd("play");
+  }
+  restart() {                              // after seeking or replaying, the song may end again
+    this.endedFor = null;
+    this.quietUntil = performance.now() + 1500;
+  }
+  pause() { this.cmd("pause"); }
+  seek(s) {
+    if (this.cued) { this.cued.start = s; this.st.t = s; return; }
+    this.st.t = s; this.st.at = performance.now();
+    this.restart();
+    this.cmd("seek", { t: s });
+  }
+  time() {
+    const st = this.st;
+    return st.playing ? Math.min(st.d || Infinity, st.t + (performance.now() - st.at) / 1000) : st.t;
+  }
+  duration() { return this.st.d || current()?.seconds || 0; }
+  buffered() { return this.st.buf || 0; }
+  setVolume(v) {                           // the slider sends many values while dragging
+    this.nextVolume = v;
+    if (this.volumeTimer) return;
+    this.volumeTimer = setTimeout(() => { this.volumeTimer = null; this.cmd("volume", { v: this.nextVolume }); }, 120);
+  }
+  setMuted(m) { this.cmd("mute", { m }); }
+
+  async poll() {
+    for (;;) {
+      await sleep(state.playing || this.want ? 350 : 900);
+      let s;
+      try { s = await api.get("/api/engine/state"); } catch { continue; }
+      this.update(s);
+    }
+  }
+  update(s) {
+    if (s.needsYou && s.needsYou !== this.lastNeed) {
+      toast(s.needsYou === "consent"
+        ? "YouTube asks for your cookie choice first. Answer it in the window that just opened."
+        : "YouTube wants to check something. Finish it in the window that just opened.");
+    }
+    this.lastNeed = s.needsYou || "";
+    if (!s.ready) return;
+    if (!this.volumeSent) {
+      this.volumeSent = true;
+      this.setVolume(state.settings.volume);
+      if (state.settings.muted) this.setMuted(true);
+    }
+    for (const c of s.cmds || []) {           // media keys / Windows media overlay
+      if (c === "next") next();
+      if (c === "prev") prev();
+    }
+    document.body.classList.toggle("ad-playing", !!s.ad);
+    if (this.cued || !this.want || s.want !== this.want) {
+      // still starting our song (or nothing requested yet)
+      if (this.want && !this.cued && performance.now() - this.loadStarted > 20000 && this.errFor !== this.want) {
+        this.errFor = this.want;
+        this.h.onError("timeout");
+      }
+      return;
+    }
+    if (s.err != null && this.errFor !== this.want) {
+      this.errFor = this.want;
+      return this.h.onError(s.err);
+    }
+    if (s.ad) { this.h.onState(s.s === 1 ? "playing" : "buffering"); return; }
+    const playing = s.s === 1 && !s.ended;
+    this.st = { t: s.t || 0, d: s.d || this.st.d, buf: s.buf, at: performance.now(), playing };
+    if (s.ended) {
+      if (this.endedFor !== this.want && performance.now() > (this.quietUntil || 0)) {
+        this.endedFor = this.want;
+        this.h.onState("ended");
+      }
+      return;
+    }
+    this.h.onState(s.s === 1 ? "playing" : s.s === 3 || s.s === -1 ? "buffering" : s.s === 2 || s.s === 5 ? "paused" : "paused");
+  }
+}
+
 let engine = null;
 let tried = new Set();   // videoIds tried for the current track (fallbacks)
 
@@ -980,8 +1110,9 @@ const engineHandlers = {
     const t = current();
     if (code === "api") return toast("The YouTube player couldn't load. Check your internet connection.", true);
     if (!t) return;
+    console.warn("[player] error", code, t.videoId);
     // 101/150: the uploader doesn't allow playback outside YouTube. Try an alternative upload.
-    if ((code === 101 || code === 150 || code === 100) && tried.size < 4) {
+    if ((code === 101 || code === 150 || code === 100 || code === 152 || code === 153 || code === "timeout") && tried.size < 4) {
       try {
         const alts = await api.get(`/api/alternatives?title=${encodeURIComponent(t.title)}&artists=${encodeURIComponent(t.artists)}`);
         const alt = alts.find((a) => !tried.has(a.videoId) && Math.abs((a.seconds || 0) - (t.seconds || 0)) < 25);
@@ -1268,8 +1399,10 @@ function pickSuggestion(s) {
 
 /* ------------------------------------------------------------------ Init --- */
 function initUI() {
-  engine = state.mock ? new DemoEngine(engineHandlers) : new YouTubeEngine(engineHandlers);
-  if (!state.mock) engine.ensure();
+  engine = state.mock ? new DemoEngine(engineHandlers)
+    : state.hostEngine ? new HostEngine(engineHandlers)
+    : new YouTubeEngine(engineHandlers);
+  if (engine instanceof YouTubeEngine) engine.ensure();
 
   renderSidebar();
   refreshHearts();

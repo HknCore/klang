@@ -77,6 +77,55 @@ jobs:
 
           "Klang.exe ${env:KLANG_VERSION}: $([math]::Round((Get-Item dist\Klang.exe).Length / 1MB, 1)) MB"
 
+      - name: Embedded player check (information only)
+        continue-on-error: true
+        run: python tests/diag_embed.py
+
+      - name: Real playback test
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          function Wait-Klang {
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep 1
+              try {
+                $page = Invoke-WebRequest http://127.0.0.1:8777/ -UseBasicParsing
+                if ($page.Content -match 'name="klang-token" content="([^"]+)"') { return $Matches[1] }
+              } catch {}
+            }
+            return $null
+          }
+          Start-Process dist\Klang.exe
+          $token = Wait-Klang
+          if (-not $token) { throw "Klang.exe did not start" }
+          $h = @{ "X-Klang-Token" = $token }
+          $ping = Invoke-RestMethod http://127.0.0.1:8777/api/ping -Headers $h
+          Write-Host "::notice title=Player::hidden YouTube Music player available: $($ping.engine)"
+
+          $songs = @("Billie Eilish birds of a feather", "Tarkan Kuzu Kuzu", "Ed Sheeran Shape of You", "Rammstein Du hast")
+          $played = 0
+          foreach ($q in $songs) {
+            $res = Invoke-RestMethod "http://127.0.0.1:8777/api/search?q=$([uri]::EscapeDataString($q))" -Headers $h
+            $song = $res.songs[0]
+            if (-not $song) { Write-Host "::warning title=Playback::no search result for $q"; continue }
+            $body = @{ cmd = "load"; videoId = $song.videoId; start = 0 } | ConvertTo-Json
+            Invoke-RestMethod http://127.0.0.1:8777/api/engine/cmd -Method Post -Headers $h -Body $body -ContentType "application/json" | Out-Null
+            $st = $null; $ok = $false
+            for ($i = 0; $i -lt 45 -and -not $ok; $i++) {
+              Start-Sleep 1
+              $st = Invoke-RestMethod http://127.0.0.1:8777/api/engine/state -Headers $h
+              $ok = ($st.want -eq $song.videoId) -and ($st.s -eq 1) -and ($st.t -gt 3) -and (-not $st.ad)
+            }
+            $summary = "state=$($st.s) t=$([math]::Round([double]$st.t,1)) ad=$($st.ad) err=$($st.err) needsYou=$($st.needsYou) ready=$($st.ready) url=$($st.url)"
+            if ($ok) { $played++; Write-Host "::notice title=Played::$($song.title) ($($song.videoId)) $summary" }
+            else { Write-Host "::warning title=Not played::$($song.title) ($($song.videoId)) $summary" }
+          }
+          $log = Get-Content "$env:APPDATA\Klang\klang.log" -Raw -ErrorAction SilentlyContinue
+          if ($log) { Write-Host "::notice title=klang.log::$(($log -replace "`r?`n", ' | ').Substring(0, [math]::Min(900, $log.Length)))" }
+          taskkill /IM Klang.exe /F | Out-Null
+          Write-Host "::notice title=Playback::$played of $($songs.Count) songs played"
+          if ($played -lt 1) { throw "No song played" }
+
       - uses: actions/upload-artifact@v4
         with:
           name: Klang-windows

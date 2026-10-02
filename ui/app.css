@@ -800,3 +800,10 @@ body.playing #seekFill { background: linear-gradient(90deg, var(--accent-deep), 
 /* Settings → "Turn animations off" */
 body.calm *, body.calm *::before, body.calm *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 body.calm .eq i { transform: scaleY(.6); }
+
+/* An ad is playing in the YouTube player */
+body.ad-playing .bar-title::after {
+  content: "Ad"; margin-left: 8px; padding: 1px 6px; border-radius: 4px; vertical-align: 1px;
+  background: #f2b880; color: #1d1e23; font-size: 10.5px; font-weight: 700;
+}
+body.ad-playing #seek { pointer-events: none; opacity: .5; }

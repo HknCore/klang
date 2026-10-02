@@ -841,7 +841,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.static(p)
             if p == "/api/ping":
                 _last_ping = time.time()
-                return self.send_json({"ok": True, "mock": MOCK})
+                return self.send_json({"ok": True, "mock": MOCK, "engine": engine_available()})
+            if p == "/api/engine/state":
+                if not engine_available():
+                    return self.send_json({"available": False})
+                st = dict(_engine["state"] or {})
+                st.update(available=True, loading=bool(_engine["pending"]) or not _engine["loaded"],
+                          needsYou=_engine["needs_you"])
+                return self.send_json(st)
             if p == "/api/search":
                 query = q.get("q", "").strip()
                 if not query:
@@ -910,6 +917,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             data = self.body()
+            if p == "/api/engine/cmd":
+                if not engine_available():
+                    return self.send_error_json(409, "The player isn't available.")
+                engine_command(str(data.get("cmd")), data)
+                return self.send_json({"ok": True})
             if p == "/api/account/login":
                 if MOCK:
                     mock_login()
@@ -932,6 +944,7 @@ class Handler(BaseHTTPRequestHandler):
                             _native["window"].clear_cookies()  # also sign the player out
                         except Exception as e:
                             print(f"[sign-out] {e!r}")
+                        engine_reload()
                 _login.update(state="idle", error="")
                 return self.send_json({"ok": True})
             if p == "/api/yt/rate":
@@ -1157,6 +1170,7 @@ def open_login_window():
                 sign_in_with(auth_headers_from_cookie(cookie))
                 _login.update(state="done")
                 win.destroy()
+                engine_reload()  # the player picks up your account (Premium: no ads)
                 return
             except Exception as e:
                 print(f"[sign-in] {e!r}")
@@ -1167,7 +1181,235 @@ def open_login_window():
     threading.Thread(target=watch, daemon=True).start()
 
 
-def run_native_window(url):
+# --- Playback engine ----------------------------------------------------------
+# Many songs on YouTube Music may not be played in embedded players (labels block
+# that). So Klang plays music through the real YouTube Music page, loaded in a
+# hidden window, and steers its player. Everything that plays on
+# music.youtube.com plays in Klang, with your account (Premium: no ads).
+
+ENGINE_HOME = "https://music.youtube.com/"
+_engine = {"win": None, "loaded": False, "state": {}, "pending": None, "needs_you": "", "lock": threading.Lock()}
+
+ENGINE_JS = r"""
+(() => {
+  if (window.__klang) return 'ok';
+  const P = () => document.getElementById('movie_player');
+  const V = () => (P() && P().querySelector('video')) || document.querySelector('video');
+  const K = window.__klang = { want: null, ended: false, err: null, cmds: [], meta: null, loadedAt: 0 };
+  const isAd = (p) => !!p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'));
+
+  // Media keys and the Windows media overlay steer Klang's queue, not YouTube Music's
+  const claimKeys = () => {
+    const ms = navigator.mediaSession;
+    if (!ms) return;
+    for (const [action, cmd] of [['nexttrack', 'next'], ['previoustrack', 'prev']]) {
+      try { ms.setActionHandler(action, () => K.cmds.push(cmd)); } catch (e) {}
+    }
+    if (K.meta) { try { ms.metadata = new MediaMetadata(K.meta); } catch (e) {} }
+  };
+
+  K.adopt = (id, meta) => { K.want = id; K.meta = meta || null; K.ended = false; K.err = null; K.loadedAt = Date.now(); claimKeys(); };
+  K.load = (id, start, meta) => {
+    const p = P();
+    if (!p || !p.loadVideoById) return false;
+    K.adopt(id, meta);
+    p.loadVideoById({ videoId: id, startSeconds: start || 0 });
+    return true;
+  };
+  K.play = () => { K.ended = false; P() && P().playVideo(); };
+  K.pause = () => { P() && P().pauseVideo(); };
+  K.seek = (t) => { K.ended = false; P() && P().seekTo(t, true); };
+  K.volume = (v) => {
+    const p = P(); if (!p) return;
+    p.setVolume(v); p.unMute();
+    const el = V(); if (el) { el.muted = false; }
+  };
+  K.mute = (m) => { const p = P(); if (!p) return; m ? p.mute() : p.unMute(); };
+
+  K.state = () => {
+    // Answer "Are you still listening?" so the music doesn't stop
+    const still = document.querySelector('ytmusic-you-there-renderer');
+    if (still) { const b = still.querySelector('button, tp-yt-paper-button, yt-button-renderer'); b && b.click(); }
+    const p = P();
+    if (!p || !p.getPlayerState) return { ready: false, url: location.href };
+    const data = (p.getVideoData && p.getVideoData()) || {};
+    const ad = isAd(p);
+    // YouTube Music moved on to a song of its own after ours ended: stop it
+    if (K.want && data.video_id && data.video_id !== K.want && !ad && Date.now() - K.loadedAt > 4000) {
+      if (!K.ended) K.ended = true;
+      if (p.getPlayerState() === 1) p.pauseVideo();
+    }
+    claimKeys();
+    return {
+      ready: true, id: data.video_id || null, want: K.want, s: p.getPlayerState(),
+      t: p.getCurrentTime ? p.getCurrentTime() : 0, d: p.getDuration ? p.getDuration() : 0,
+      buf: p.getVideoLoadedFraction ? p.getVideoLoadedFraction() : 0,
+      ad, ended: K.ended, err: K.err, cmds: K.cmds.splice(0),
+    };
+  };
+
+  // Catch the end of a song before YouTube Music starts its own next song
+  document.addEventListener('timeupdate', (e) => {
+    const el = e.target, p = P();
+    if (!K.want || K.ended || isAd(p) || !el.duration || !isFinite(el.duration)) return;
+    const data = (p && p.getVideoData && p.getVideoData()) || {};
+    if (data.video_id && data.video_id !== K.want) return;
+    if (el.currentTime >= el.duration - 0.45) { K.ended = true; el.pause(); }
+  }, true);
+  document.addEventListener('ended', () => { if (K.want && !isAd(P())) K.ended = true; }, true);
+
+  const hook = () => {
+    const p = P();
+    if (p && p.addEventListener && !K.hooked) { K.hooked = true; p.addEventListener('onError', (code) => { K.err = code; }); }
+  };
+  hook(); setInterval(hook, 1000);
+  return 'ok';
+})()
+"""
+
+
+def engine_available():
+    return _engine["win"] is not None and not MOCK
+
+
+def engine_js(code):
+    win = _engine["win"]
+    if win is None or not _engine["loaded"]:
+        return None
+    return win.evaluate_js(code)
+
+
+def engine_inject():
+    try:
+        engine_js(ENGINE_JS)
+    except Exception as e:
+        print(f"[engine] inject failed: {e!r}")
+
+
+def engine_command(cmd, args):
+    """Run a player command from Klang's window."""
+    if cmd == "load":
+        vid = str(args.get("videoId") or "")
+        if not re.fullmatch(r"[\w-]{6,20}", vid):
+            raise ValueError("Invalid song")
+        job = {"id": vid, "start": float(args.get("start") or 0), "meta": args.get("meta") or None}
+        with _engine["lock"]:
+            _engine["pending"] = job
+        engine_run_pending()
+        return
+    simple = {
+        "play": "window.__klang && window.__klang.play()",
+        "pause": "window.__klang && window.__klang.pause()",
+        "seek": f"window.__klang && window.__klang.seek({float(args.get('t') or 0)})",
+        "volume": f"window.__klang && window.__klang.volume({max(0, min(100, int(args.get('v') or 0)))})",
+        "mute": f"window.__klang && window.__klang.mute({'true' if args.get('m') else 'false'})",
+    }
+    if cmd not in simple:
+        raise ValueError("Unknown command")
+    engine_js(simple[cmd])
+
+
+def engine_run_pending():
+    """Start the requested song, by steering the player or, if it isn't there yet, by opening the song's page."""
+    with _engine["lock"]:
+        job = _engine["pending"]
+    if not job:
+        return
+    win = _engine["win"]
+    meta = json.dumps(job["meta"])
+    st = _engine["state"] or {}
+    try:
+        if st.get("ready"):
+            if st.get("id") == job["id"] and st.get("want") != job["id"]:
+                # the page was opened for this very song: just take it over
+                engine_js(f"window.__klang.adopt({json.dumps(job['id'])}, {meta})")
+                if job["start"] > 1:
+                    engine_js(f"window.__klang.seek({job['start']})")
+                ok = True
+            else:
+                ok = engine_js(f"window.__klang.load({json.dumps(job['id'])}, {job['start']}, {meta})")
+            if ok:
+                with _engine["lock"]:
+                    if _engine["pending"] is job:
+                        _engine["pending"] = None
+                return
+        if not job.get("navigated") and _engine["loaded"]:
+            job["navigated"] = True
+            _engine["loaded"] = False
+            _engine["state"] = {}
+            win.load_url(f"https://music.youtube.com/watch?v={job['id']}")
+    except Exception as e:
+        print(f"[engine] load failed: {e!r}")
+
+
+def engine_reload():
+    win = _engine["win"]
+    if win is not None:
+        _engine["loaded"] = False
+        _engine["state"] = {}
+        try:
+            win.load_url(ENGINE_HOME)
+        except Exception as e:
+            print(f"[engine] reload failed: {e!r}")
+
+
+def engine_poll():
+    while True:
+        time.sleep(0.3)
+        win = _engine["win"]
+        if win is None:
+            return
+        if not _engine["loaded"]:
+            continue
+        try:
+            st = engine_js("window.__klang ? window.__klang.state() : null")
+            if st is None:
+                engine_inject()
+                continue
+            _engine["state"] = st
+            if _engine["pending"] and st.get("ready"):
+                engine_run_pending()
+        except Exception as e:
+            print(f"[engine] poll: {e!r}")
+            time.sleep(1)
+
+
+def create_engine_window(webview):
+    win = webview.create_window("Klang playback", ENGINE_HOME, hidden=True, width=1100, height=760,
+                                background_color="#1d1e23")
+    _engine["win"] = win
+
+    def on_loaded():
+        try:
+            url = win.get_current_url() or ""
+        except Exception:
+            url = ""
+        if "music.youtube.com" not in url:
+            # YouTube wants something from you first (cookie choice in Europe, a robot check…): show it
+            _engine["needs_you"] = "consent" if "consent." in url else "check"
+            try:
+                win.show()
+            except Exception:
+                pass
+            return
+        if _engine["needs_you"]:
+            _engine["needs_you"] = ""
+            try:
+                win.hide()
+            except Exception:
+                pass
+        _engine["state"] = {}
+        _engine["loaded"] = True
+        engine_inject()
+        engine_run_pending()
+
+    win.events.loaded += on_loaded
+    win.events.shown += lambda: style_title_bar(win)
+    threading.Thread(target=engine_poll, daemon=True).start()
+    return win
+
+
+def run_native_window(url, with_engine=True):
     """Open Klang in its own app window (WebView2). Returns False if that isn't possible."""
     try:
         import webview
@@ -1186,6 +1428,24 @@ def run_native_window(url):
 
         window.events.shown += on_shown
         _native["window"] = window
+        if with_engine and not MOCK:
+            create_engine_window(webview)
+
+            def on_main_closed():
+                # Closing Klang's window quits Klang, including the hidden player
+                for w in list(webview.windows):
+                    if w is not window:
+                        try:
+                            w.destroy()
+                        except Exception:
+                            pass
+
+            window.events.closed += on_main_closed
+        # Let the hidden player start songs without a click inside it
+        os.environ.setdefault(
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            "--disable-features=ElasticOverscroll --autoplay-policy=no-user-gesture-required",
+        )
         webview.start(
             gui="edgechromium" if os.name == "nt" else None,
             private_mode=False,  # keep settings and queue between sessions
@@ -1216,7 +1476,7 @@ def main():
     url = f"http://{HOST}:{PORT}/"
     if port_in_use():
         # Already running: just open another window onto the same library
-        if not NO_WINDOW and not run_native_window(url):
+        if not NO_WINDOW and not run_native_window(url, with_engine=False):
             open_browser_window(url)
         close_splash()
         return
