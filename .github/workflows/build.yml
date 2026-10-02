@@ -1,0 +1,63 @@
+name: Build Klang.exe
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt "pyinstaller>=6.10,<7"
+
+      - name: Set version
+        shell: pwsh
+        run: |
+          $v = if ("${{ github.event_name }}" -eq "release") { "${{ github.event.release.tag_name }}".TrimStart("v") } else { "0.0.0" }
+          "KLANG_VERSION=$v" >> $env:GITHUB_ENV
+
+      - name: Build
+        run: pyinstaller --noconfirm klang.spec
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          Start-Process dist\Klang.exe -ArgumentList "--mock", "--no-window"
+          $ok = $false
+          for ($i = 0; $i -lt 30 -and -not $ok; $i++) {
+            Start-Sleep 1
+            try { $ok = (Invoke-RestMethod http://127.0.0.1:8777/api/ping).ok } catch {}
+          }
+          if (-not $ok) { throw "Klang.exe did not start" }
+          $page = Invoke-WebRequest http://127.0.0.1:8777/ -UseBasicParsing
+          if ($page.StatusCode -ne 200 -or $page.Content -notmatch "klang") { throw "UI not served" }
+          $res = Invoke-RestMethod "http://127.0.0.1:8777/api/search?q=glass"
+          if ($res.songs.Count -lt 1) { throw "Search returned nothing" }
+          taskkill /IM Klang.exe /F | Out-Null
+          "Klang.exe ${env:KLANG_VERSION}: $([math]::Round((Get-Item dist\Klang.exe).Length / 1MB, 1)) MB"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Klang-windows
+          path: dist/Klang.exe
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/Klang.exe --clobber

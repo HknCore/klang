@@ -8,6 +8,7 @@ Playback uses the official embedded YouTube player.
 Usage:  python server.py              (normal)
         python server.py --mock       (demo mode, no internet needed)
         python server.py --no-window  (server only)
+        Klang.exe [same options]      (packaged build)
 """
 
 from __future__ import annotations
@@ -31,10 +32,25 @@ from urllib.parse import parse_qs, urlparse
 
 HOST = "127.0.0.1"
 PORT = 8777
-ROOT = Path(__file__).resolve().parent
-UI_DIR = ROOT / "ui"
-DATA_DIR = ROOT / "data"
+
+# Packaged as Klang.exe (PyInstaller): the UI is unpacked to a temp folder and
+# the library lives in %APPDATA%\Klang, because the exe's folder may be read-only.
+FROZEN = getattr(sys, "frozen", False)
+if FROZEN:
+    ROOT = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    DATA_DIR = Path(os.environ.get("APPDATA") or Path.home()) / "Klang"
+else:
+    ROOT = Path(__file__).resolve().parent
+    DATA_DIR = ROOT / "data"
+UI_DIR = (ROOT / "ui").resolve()
 LIBRARY_FILE = DATA_DIR / "library.json"
+
+# A windowed exe has no console: send output to a log file instead of crashing on print().
+if sys.stdout is None or sys.stderr is None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _log = open(DATA_DIR / "klang.log", "a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stdout or _log
+    sys.stderr = sys.stderr or _log
 
 MOCK = "--mock" in sys.argv
 NO_WINDOW = "--no-window" in sys.argv
@@ -390,7 +406,7 @@ def load_library():
 
 
 def save_library(lib):
-    DATA_DIR.mkdir(exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp = LIBRARY_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(lib, ensure_ascii=False, indent=1), "utf-8")
     os.replace(tmp, LIBRARY_FILE)
@@ -678,7 +694,7 @@ def main():
         if not NO_WINDOW:
             open_window(url)
         return
-    DATA_DIR.mkdir(exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     server.daemon_threads = True
     print(f"Klang is running at {url}" + ("  (demo mode)" if MOCK else ""))

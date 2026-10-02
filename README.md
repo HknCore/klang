@@ -9,7 +9,8 @@ A fast, good-looking music player for Windows with a search that actually finds 
 
 <p>
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-a58bff?style=flat-square&labelColor=1d1e23" alt="Windows 10 and 11">
-  <img src="https://img.shields.io/badge/App%20size-under%201%20MB-a58bff?style=flat-square&labelColor=1d1e23" alt="App size under 1 MB">
+  <img src="https://img.shields.io/badge/Install-just%20one%20.exe-a58bff?style=flat-square&labelColor=1d1e23" alt="Just one exe">
+  <img src="https://img.shields.io/github/actions/workflow/status/HknCore/klang/build.yml?style=flat-square&labelColor=1d1e23&color=a58bff&label=build" alt="Build status">
   <img src="https://img.shields.io/badge/Account-not%20required-a58bff?style=flat-square&labelColor=1d1e23" alt="No account required">
   <img src="https://img.shields.io/badge/License-MIT-a58bff?style=flat-square&labelColor=1d1e23" alt="MIT license">
 </p>
@@ -51,7 +52,7 @@ Results are split into **Songs**, **Albums**, **Artists** and **Videos**. Duplic
 <img src="docs/icons/feather.svg" width="44" alt="">
 
 ### Light on your PC
-No bundled browser, no Electron. Klang runs a tiny local helper and draws its window with the Edge engine Windows already has. The app itself is under 1 MB.
+One .exe, nothing to install. No bundled browser, no Electron: Klang runs a tiny local helper and draws its window with the Edge engine Windows already has.
 
 </td>
 </tr>
@@ -150,20 +151,19 @@ Graphite and lavender, smooth transitions, a breathing ring around the cover whi
 
 ## ⬇ Get started in a minute
 
-> **You need:** Windows 10 or 11 and [Python 3.9 or newer](https://www.python.org/downloads/).<br>
-> Don't have Python? Open a terminal and run `winget install Python.Python.3.12`.
+> **You need:** Windows 10 or 11. Nothing else, no Python, no installer.
 
 <table>
 <tr>
 <td align="center" width="33%">
 <h3>1</h3>
 <b>Download</b><br>
-Get <code>Klang-…-windows.zip</code> from the<br><a href="https://github.com/HknCore/klang/releases/latest">latest release</a> and unzip it anywhere.
+Get <a href="https://github.com/HknCore/klang/releases/latest/download/Klang.exe"><code>Klang.exe</code></a><br>from the latest release.
 </td>
 <td align="center" width="33%">
 <h3>2</h3>
-<b>Double-click <code>Klang.bat</code></b><br>
-The first start sets things up for about a minute. After that, Klang opens in a second or two.
+<b>Double-click it</b><br>
+Put it anywhere you like, for example on your desktop, and start it.
 </td>
 <td align="center" width="33%">
 <h3>3</h3>
@@ -173,9 +173,24 @@ Press <kbd>Ctrl</kbd>+<kbd>K</kbd>, type a song, press <kbd>Enter</kbd>. That's 
 </tr>
 </table>
 
-**Want it on your desktop?** Double-click `Create shortcut.bat` once. Klang gets its own icon.
+**Windows says it protected your PC?** Klang isn't code-signed yet, so SmartScreen doesn't know it. Click **More info → Run anyway**. Every build is made in the open by [GitHub Actions](../../actions) from the code in this repository.
 
-**Something stopped working after a YouTube change?** Double-click `Update.bat`.
+**Want it in your taskbar or Start menu?** Right-click `Klang.exe` and choose **Pin to taskbar** or **Pin to Start** (on Windows 11 under **Show more options**).
+
+**New version out?** Download the new `Klang.exe` and replace the old one. Your liked songs and playlists stay where they are.
+
+<details>
+<summary><b>Run from source instead</b></summary>
+<br>
+
+You need [Python 3.9 or newer](https://www.python.org/downloads/) (`winget install Python.Python.3.12`).
+
+1. Download the repository (**Code → Download ZIP**) and unzip it.
+2. Double-click `Klang.bat`. The first start sets things up for about a minute.
+3. Optional: `Create shortcut.bat` puts Klang on your desktop, `Update.bat` refreshes the YouTube Music connector.
+
+To build the exe yourself: `pip install pyinstaller`, then `pyinstaller klang.spec`. The result is in `dist/`.
+</details>
 
 <br>
 
@@ -223,13 +238,13 @@ Not yet. It's the next big thing on the list (see below).
 <details>
 <summary><b>Where is my data stored?</b></summary>
 <br>
-In <code>data/library.json</code> next to <code>Klang.bat</code>. Back it up or copy it to another PC to take your library with you.
+In <code>%APPDATA%\Klang\library.json</code> (paste that into the Explorer address bar). Back it up or copy it to another PC to take your library with you. When running from source, it lives in <code>data/</code> next to <code>Klang.bat</code>.
 </details>
 
 <details>
 <summary><b>Can I try it without internet?</b></summary>
 <br>
-Yes. Run <code>python server.py --mock</code> to open a demo with sample music. That's how the screenshots on this page were made.
+Yes. Run <code>Klang.exe --mock</code> (or <code>python server.py --mock</code>) to open a demo with sample music. That's how the screenshots on this page were made.
 </details>
 
 <br>
@@ -250,7 +265,8 @@ Klang only listens on your own computer (`127.0.0.1`), never on your network. It
 - [ ] Sign in to see your YouTube Music library and playlists
 - [ ] Mini player that stays on top
 - [ ] Tray icon and media keys when the window is in the background
-- [ ] One-file installer, no Python needed
+- [x] One .exe, no Python needed
+- [ ] Code-signed builds, so Windows stops warning on first start
 
 Ideas and bug reports are welcome in the issues.
 
@@ -259,15 +275,15 @@ Ideas and bug reports are welcome in the issues.
 ## 🛠 How it works
 
 ```
- Klang.bat ──▶ server.py (local helper, 127.0.0.1:8777)
+ Klang.exe ──▶ server.py (local helper, 127.0.0.1:8777)
                   │  cleans up search results via ytmusicapi
-                  │  stores likes and playlists in data/library.json
+                  │  stores likes and playlists in %APPDATA%\Klang
                   ▼
               Edge app window ──▶ ui/  (plain HTML, CSS, JavaScript)
                                    └─ plays through the official YouTube embed
 ```
 
-No build step, no frameworks. The interface is three files in `ui/`, the helper is a single Python file. Run `python server.py --no-window` to start just the helper and open `http://127.0.0.1:8777` in any browser.
+No frameworks. The interface is three files in `ui/`, the helper is a single Python file, and `klang.spec` packs both into `Klang.exe`. Every push is built and smoke-tested on Windows by GitHub Actions; publishing a release attaches the exe automatically. Run `python server.py --no-window` to start just the helper and open `http://127.0.0.1:8777` in any browser.
 
 <br>
 
